@@ -714,10 +714,7 @@ function App() {
             <Textarea
               label="Votre message"
               placeholder="Partagez votre expérience, vos suggestions..."
-              {...register("feedback", { 
-                required: "Un message est requis",
-                minLength: { value: 10, message: "Le message doit contenir au moins 10 caractères" }
-              })}
+              {...register("feedback")}
               error={errors.feedback?.message}
             />
 

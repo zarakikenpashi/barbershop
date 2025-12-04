@@ -15,7 +15,7 @@ const REWARDS = [
   {
     id: 1, 
     title: "Coupe gratuite", 
-    description: "Ta prochaine coupe est offerte !", 
+    description: "La classe ne s'achète pas… mais aujourd'hui elle est gratuite !", 
     emoji: "✂️",
     color: "from-purple-500 to-purple-700",
     probability: 0.04
@@ -23,7 +23,7 @@ const REWARDS = [
   { 
     id: 2, 
     title: "30% de réduction", 
-    description: "Sur ta prochaine visite", 
+    description: "Boum ! -30% sur ta prochaine coupe ! Profitons ensemble", 
     emoji: "🎉",
     color: "from-green-500 to-green-700",
     probability: 0.04
@@ -31,7 +31,7 @@ const REWARDS = [
   { 
     id: 3, 
     title: "Pigmentation offerte", 
-    description: "Valable sur ta prochaine coupe", 
+    description: "Glow-up activé ! Ta pigmentation est cadeau", 
     emoji: "🎨",
     color: "from-blue-500 to-blue-700",
     probability: 0.04
@@ -39,7 +39,7 @@ const REWARDS = [
   { 
     id: 4, 
     title: "20% de réduction", 
-    description: "À utiliser dans les 30 jours", 
+    description: "Un boost pour ton style, un cadeau pour ton portefeuille", 
     emoji: "💰",
     color: "from-yellow-500 to-yellow-700",
     probability: 0.04
@@ -47,15 +47,15 @@ const REWARDS = [
   { 
     id: 5, 
     title: "10% de réduction", 
-    description: "Sur ta prochaine prestation", 
+    description: "Un petit geste qui fait toujours plaisir", 
     emoji: "🎁",
     color: "from-orange-500 to-orange-700",
     probability: 0.04
   },
   {
     id: 0,
-    title: "Pas de chance cette fois !",
-    description: "Reviens nous voir bientôt pour une nouvelle chance 🙏",
+    title: "Pas de chance",
+    description: "Ce n’est que partie remise ! Reviens tenter ta chance au Beaufort",
     emoji: "😔",
     color: "from-gray-500 to-gray-700",
     probability: 0.80 // 80% de chance de ne rien gagner
@@ -521,10 +521,10 @@ function App() {
   };
 
   const generations = [
-    { id: 'gen-z', label: 'Génération Z (1997-2012)', value: 'gen-z' },
-    { id: 'millennial', label: 'Millennials (1981-1996)', value: 'millennial' },
-    { id: 'gen-x', label: 'Génération X (1965-1980)', value: 'gen-x' },
-    { id: 'boomer', label: 'Baby Boomers (1946-1964)', value: 'boomer' },
+    { id: '-18', label: 'Jeune (moins de 18 ans)', value: 'Jeune (moins de 18 ans)' },
+    { id: '1825', label: 'Jeune Adulte (18 - 25 ans)', value: 'Jeune Adulte (18 - 25 ans)' },
+    { id: '2640', label: 'Adulte (26 - 40 ans)', value: 'Adulte (26 - 40 ans)' },
+    { id: '4155', label: 'Adulte Mature (41 - 55 ans)', value: 'Adulte Mature (41 - 55 ans)' },
   ];
 
   const getRandomReward = () => {
@@ -588,10 +588,11 @@ function App() {
             <div className="flex flex-col items-center justify-center w-full">
               <div className="text-center space-y-4 mb-8">
                 <h2 className="text-4xl font-bold text-white">
-                  Skip the Wait
+                  Prêt à tenter ta chance ?
                 </h2>
                 <p className="text-white/90 text-base leading-relaxed max-w-sm">
-                  Track queues, reach your stylist faster with our app
+                  Bienvenue au Beaufort Barbershop.
+                  Gratte, joue et tente de gagner de nombreux lots.
                 </p>
               </div>
               <Button onClick={handleNext}>
@@ -606,15 +607,15 @@ function App() {
       {step === 2 && (
         <PageContainer className="px-6 py-8">
           <PageHeader 
-            title="Faisons connaissance"
-            subtitle="Partagez vos informations pour commencer"
+            title="Faisons connaissance 👋"
+            subtitle="Renseigne tes informations pour participer au jeu et récupérer ton cadeau en cas de gain."
           />
           
           <form onSubmit={handleSubmit(onSubmitStep2)} className="space-y-5">
             <Input
               label="Nom & Prénoms"
               type="text"
-              placeholder="Ex: Jean Kouassi"
+              placeholder="Ex : Yao Kouamé Junior"
               {...register("fullName", { 
                 required: "Le nom est requis",
                 minLength: { value: 3, message: "Le nom doit contenir au moins 3 caractères" }
@@ -626,7 +627,7 @@ function App() {
               label="Numéro WhatsApp"
               icon={<IoLogoWhatsapp className='size-6 text-green-500' />}
               type="tel"
-              placeholder="Ex: +225 07 07 07 07 07"
+              placeholder="Ex : +225 05 05 05 05 05"
               {...register("whatsapp", { 
                 required: "Le numéro WhatsApp est requis",
                 pattern: { 
@@ -650,8 +651,8 @@ function App() {
       {step === 3 && (
         <PageContainer className="px-6 py-8">
           <PageHeader 
-            title="À quelle génération appartenez-vous ?"
-            subtitle="Sélectionnez votre tranche d'âge"
+            title="Dans quelle catégorie te situes-tu ?"
+            subtitle="Merci de sélectionner la tranche qui te correspond."
           />
           
           <form onSubmit={onSubmitStep3} className="space-y-5">
@@ -682,8 +683,8 @@ function App() {
       {step === 4 && (
         <PageContainer className="px-6 py-8">
           <PageHeader 
-            title="Note ta nouvelle coupe"
-            subtitle="Comment trouves-tu ta coupe ?"
+            title="Alors, on t'a bien coiffé ? 😎"
+            subtitle="Dis-nous ce que tu penses de ta nouvelle coupe chez Beaufort"
           />
           
           <form onSubmit={onSubmitStep4} className="space-y-8">
@@ -706,14 +707,14 @@ function App() {
       {step === 5 && (
         <PageContainer className="px-6 py-8">
           <PageHeader 
-            title="Avis / Suggestion"
-            subtitle="Dites-nous ce que vous pensez"
+            title="Ton opinion compte !"
+            subtitle="Dis-nous ce qu’on peut améliorer pour rendre ton expérience encore plus clean 💯"
           />
           
           <form onSubmit={handleSubmit(onSubmitStep5)} className="space-y-5">
             <Textarea
               label="Votre message"
-              placeholder="Partagez votre expérience, vos suggestions..."
+              placeholder="Ex : Le service a été rapide, j'aimerais que vous ajoutiez…"
               {...register("feedback")}
               error={errors.feedback?.message}
             />
@@ -731,8 +732,8 @@ function App() {
       {step === 6 && (
         <PageContainer className="px-6 py-8">
             <PageHeader 
-              title="Grattez et gagnez"
-              subtitle="Gratte pour découvrir ton prix !"
+              title="Gratte et découvre ton cadeau"
+              subtitle="Il suffit de gratter… et peut-être repartir avec un lot Beaufort Barbershop"
             />
             {!result && (
             <ScratchCard

@@ -1,9 +1,34 @@
+/*
+THESIS: Un avis client dans une interface d’application Apple, sobre et familière.
+OWN-WORLD: Fond iOS gris clair, surfaces blanches, listes groupées, police système et accent or Beaufort.
+STORY: Donner son avis, confirmer son enregistrement, puis découvrir un résultat conservé.
+FIRST VIEWPORT: Marque en haut, photo du salon, grand titre et bouton Donner mon avis en bas.
+FORM: Direction Apple explicitement choisie par le client ; application web mobile, sans faux cadre iPhone.
+*/
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { IoLogoWhatsapp } from "react-icons/io";
-import { IoArrowBack } from "react-icons/io5";
+import { IoChevronBack, IoCheckmark, IoChevronForward, IoGiftOutline, IoCutOutline, IoHeartOutline, IoCopyOutline, IoAlertCircleOutline } from "react-icons/io5";
 
-const WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL;
+const PARTICIPATION_KEY = "beaufort-opening-participation-v2";
+
+function loadParticipationId() {
+  try { return localStorage.getItem(PARTICIPATION_KEY) || ""; } catch { return ""; }
+}
+
+async function participationRequest(payload) {
+  const response = await fetch('/api/participation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(60000),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.message || "Impossible de joindre le salon. Réessaie dans un instant.");
+  }
+  return result;
+}
 
 const EMOJIS = [
   { value: 1, label: "😤", description: "Mou-mou, c'était pas ça" },
@@ -19,58 +44,76 @@ const REWARDS = [
     title: "Coupe gratuite",
     description: "La classe ne s'achète pas… mais aujourd'hui elle est gratuite !",
     emoji: "✂️",
-    color: "from-purple-500 to-purple-700",
-    probability: 0.04,
   },
   {
     id: 2,
     title: "30% de réduction",
     description: "Boum ! -30% sur ta prochaine coupe !",
     emoji: "🎉",
-    color: "from-green-500 to-green-700",
-    probability: 0.04,
   },
   {
     id: 3,
     title: "Pigmentation offerte",
     description: "Glow-up activé ! Ta pigmentation est cadeau",
     emoji: "🎨",
-    color: "from-blue-500 to-blue-700",
-    probability: 0.04,
   },
   {
     id: 4,
     title: "20% de réduction",
     description: "Un boost pour ton style, un cadeau pour ton portefeuille",
     emoji: "💰",
-    color: "from-yellow-500 to-yellow-700",
-    probability: 0.04,
   },
   {
     id: 5,
     title: "10% de réduction",
     description: "Un petit geste qui fait toujours plaisir",
     emoji: "🎁",
-    color: "from-orange-500 to-orange-700",
-    probability: 0.04,
   },
   {
     id: 0,
-    title: "Pas de chance",
-    description: "Ce n'est que partie remise ! Reviens tenter ta chance au Beaufort",
-    emoji: "😔",
-    color: "from-gray-500 to-gray-700",
-    probability: 0.8,
+    title: "Merci pour ta visite !",
+    description: "Pas de lot cette fois, mais ton avis nous aide à améliorer ton prochain passage. Bienvenue chez Beaufort !",
+    emoji: "💛",
   },
 ];
 
 const TOTAL_STEPS = 5;
 
-const generatePromoCode = () => {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return `BBF-${code}`;
+const RATING_CRITERIA = [
+  { key: "coupe", label: "Ta coupe", description: "Le résultat te plaît ?" },
+  { key: "accueil", label: "L’accueil", description: "Tu t’es senti bien accueilli ?" },
+  { key: "attente", label: "Le temps d’attente", description: "L’attente avant ta coupe te convient ?" },
+];
+const DISCOVERY_SOURCES = ["WhatsApp", "Instagram", "Un ami / bouche-à-oreille", "En passant devant le salon", "Autre"];
+
+const ShareResult = () => {
+  const [shareNotice, setShareNotice] = useState("");
+  // Share only the public entry point, never a result, contact or gift code.
+  const url = new URL('/', window.location.origin).href;
+  const text = 'J’ai tenté ma chance chez Le BeauFORT BarberShop ✂️ À toi de jouer !';
+  const shareElsewhere = async () => {
+    setShareNotice("");
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Le BeauFORT BarberShop', text, url });
+      } else {
+        await navigator.clipboard.writeText(text + '\n' + url);
+        setShareNotice('Lien copié ! Colle-le dans le réseau de ton choix.');
+      }
+    } catch (error) {
+      if (error.name !== 'AbortError') setShareNotice('Partage indisponible. Tu peux utiliser le bouton WhatsApp.');
+    }
+  };
+  return (
+    <div className="result-share">
+      <p className="field-help">Invite tes amis à tenter leur chance.</p>
+      <a className="app-button button-secondary" href={'https://wa.me/?text=' + encodeURIComponent(text + '\n' + url)} target="_blank" rel="noopener noreferrer">
+        <IoLogoWhatsapp aria-hidden="true" /> Partager sur WhatsApp
+      </a>
+      <button type="button" className="text-button" onClick={shareElsewhere}>Partager ailleurs</button>
+      <p className="field-help" role="status" aria-live="polite">{shareNotice}</p>
+    </div>
+  );
 };
 
 // --- Composants UI ---
@@ -78,43 +121,38 @@ const generatePromoCode = () => {
 const ProgressBar = ({ step }) => {
   const pct = Math.min(((step - 2) / (TOTAL_STEPS - 1)) * 100, 100);
   return (
-    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+    <div className="progress-track" role="progressbar" aria-label="Progression du questionnaire" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
       <div
-        className="h-full bg-[#ffcc00] rounded-full transition-all duration-500 ease-out"
-        style={{ width: `${pct}%` }}
+        className="progress-fill"
+        style={{ transform: `scaleX(${pct / 100})` }}
       />
     </div>
   );
 };
 
 const StepHeader = ({ step, onBack }) => (
-  <div className="flex flex-col gap-3 px-6 pt-6 pb-4 border-b border-gray-100">
-    <div className="flex items-center justify-between">
+  <header className="navigation-bar">
+    <div className="navigation-row">
       <button
         type="button"
         onClick={onBack}
-        className="flex items-center justify-center w-10 h-10 -ml-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors"
+        disabled={!onBack}
+        className="back-button"
         aria-label="Retour"
       >
-        <IoArrowBack className="size-5 text-[#010006]" />
+        <IoChevronBack aria-hidden="true" />
+        <span>Retour</span>
       </button>
-      <img
-        src="/logo.png"
-        alt="Beaufort Barbershop"
-        className="h-8 object-contain"
-        onError={(e) => { e.target.style.display = "none"; }}
-      />
-      <span className="text-xs font-semibold text-gray-400 tabular-nums">
-        {step - 1} / {TOTAL_STEPS}
-      </span>
+      <span className="navigation-title">Beaufort</span>
+      <span className="step-counter">{step - 1} sur {TOTAL_STEPS}</span>
     </div>
     <ProgressBar step={step} />
-  </div>
+  </header>
 );
 
 const Confetti = () => {
-  const colors = ["#ffcc00", "#ff6b6b", "#4ecdc4", "#45b7d1", "#96e6a1", "#ffd93d", "#c084fc"];
-  const pieces = Array.from({ length: 70 }, (_, i) => ({
+  const colors = ["#efc44a", "#d7b452", "#d1d1d6", "#ffffff"];
+  const [pieces] = useState(() => Array.from({ length: 36 }, (_, i) => ({
     id: i,
     x: Math.random() * 100,
     delay: Math.random() * 1,
@@ -122,7 +160,7 @@ const Confetti = () => {
     color: colors[i % colors.length],
     size: 5 + Math.random() * 7,
     round: i % 3 === 0,
-  }));
+  })));
   return (
     <div className="fixed inset-0 pointer-events-none overflow-hidden z-50">
       {pieces.map((p) => (
@@ -148,9 +186,7 @@ const Confetti = () => {
 const RadioButton = ({ id, name, value, checked, onChange, label }) => (
   <label
     htmlFor={id}
-    className={`flex items-center w-full p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
-      checked ? "border-[#ffcc00] bg-amber-50" : "border-gray-200 bg-white hover:border-gray-300"
-    }`}
+    className={`choice-row ${checked ? "is-selected" : ""}`}
   >
     <input
       type="radio"
@@ -159,106 +195,71 @@ const RadioButton = ({ id, name, value, checked, onChange, label }) => (
       value={value}
       checked={checked}
       onChange={onChange}
-      className="sr-only"
+      className="choice-input"
     />
-    <div
-      className={`w-5 h-5 mr-3 shrink-0 rounded-full border-2 flex items-center justify-center transition-colors ${
-        checked ? "border-[#ffcc00]" : "border-gray-300"
-      }`}
-    >
-      {checked && <div className="w-2.5 h-2.5 rounded-full bg-[#ffcc00]" />}
-    </div>
-    <span className={`text-base leading-tight ${checked ? "text-[#010006] font-semibold" : "text-gray-600"}`}>
-      {label}
-    </span>
+    <span>{label}</span>
+    <span className="choice-check" aria-hidden="true">{checked && <IoCheckmark />}</span>
   </label>
 );
 
 const Input = ({ label, icon, error, ...props }) => (
-  <div className="flex flex-col gap-1.5">
-    {label && <label className="text-sm font-semibold text-[#010006]">{label}</label>}
-    {icon ? (
-      <div
-        className={`flex gap-3 items-center border-2 px-4 py-3.5 rounded-xl transition-colors ${
-          error
-            ? "border-red-400 focus-within:border-red-500"
-            : "border-gray-200 focus-within:border-[#ffcc00]"
-        }`}
-      >
-        {icon}
-        <input
-          className="outline-none flex-1 text-[#010006] placeholder:text-gray-400 bg-transparent text-base"
-          {...props}
-        />
-      </div>
-    ) : (
-      <input
-        className={`w-full border-2 px-4 py-3.5 rounded-xl outline-none transition-colors text-[#010006] placeholder:text-gray-400 text-base ${
-          error
-            ? "border-red-400 focus:border-red-500"
-            : "border-gray-200 focus:border-[#ffcc00]"
-        }`}
-        {...props}
-      />
-    )}
-    {error && <span className="text-xs text-red-500 font-medium">{error}</span>}
+  <div className="field">
+    <label htmlFor={props.name} className="field-label">{label}</label>
+    <div className={`input-surface ${error ? "has-error" : ""}`}>
+      {icon && <span className="input-icon" aria-hidden="true">{icon}</span>}
+      <input id={props.name} aria-invalid={Boolean(error)} aria-describedby={error ? `${props.name}-error` : undefined} {...props} />
+    </div>
+    {error && <span id={`${props.name}-error`} className="field-error">{error}</span>}
   </div>
 );
 
 const Textarea = ({ label, error, ...props }) => (
-  <div className="flex flex-col gap-1.5">
-    {label && <label className="text-sm font-semibold text-[#010006]">{label}</label>}
+  <div className="field">
+    <label htmlFor={props.name} className="field-label">{label || "Un mot pour nous ?"} <span className="optional-label">Facultatif</span></label>
     <textarea
-      className={`w-full border-2 px-4 py-3.5 rounded-xl outline-none transition-colors text-[#010006] placeholder:text-gray-400 min-h-[130px] resize-none text-base ${
-        error
-          ? "border-red-400 focus:border-red-500"
-          : "border-gray-200 focus:border-[#ffcc00]"
-      }`}
+      id={props.name}
+      className={`textarea-surface ${error ? "has-error" : ""}`}
+      aria-invalid={Boolean(error)}
+      aria-describedby={error ? `${props.name}-error` : undefined}
       {...props}
     />
-    {error && <span className="text-xs text-red-500 font-medium">{error}</span>}
+    {error && <span id={`${props.name}-error`} className="field-error">{error}</span>}
   </div>
 );
 
 const Button = ({ children, variant = "primary", ...props }) => (
   <button
-    className={`w-full h-14 px-6 text-base font-bold rounded-2xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] ${
-      variant === "primary"
-        ? "bg-[#ffcc00] text-[#010006] hover:bg-amber-400 shadow-md shadow-amber-200/60"
-        : "bg-gray-100 text-[#010006] hover:bg-gray-200"
-    }`}
+    className={`app-button ${variant === "primary" ? "button-primary" : "button-secondary"}`}
     {...props}
   >
-    {children}
+    <span>{children}</span>
+    <IoChevronForward aria-hidden="true" />
   </button>
 );
 
 const EmojiRating = ({ value, onChange, error }) => (
-  <div className="flex flex-col gap-4">
-    <div className="flex justify-between gap-2">
+  <div className="rating-control">
+    <div className="rating-options">
       {EMOJIS.map((emoji) => (
         <button
           key={emoji.value}
           type="button"
           onClick={() => onChange(emoji.value)}
-          className={`flex-1 text-3xl py-3 rounded-2xl border-2 transition-all duration-200 ${
-            value === emoji.value
-              ? "border-[#ffcc00] bg-amber-50 scale-110 shadow-sm"
-              : "border-gray-200 hover:border-gray-300 hover:scale-105"
-          }`}
-          title={emoji.description}
+          className={`rating-option ${value === emoji.value ? "is-selected" : ""}`}
+          title={`${emoji.value} sur 5`}
+          aria-label={`${emoji.value} sur 5`}
+          aria-pressed={value === emoji.value}
         >
-          {emoji.label}
+          <span className="rating-emoji" aria-hidden="true">{emoji.label}</span>
+          <span className="rating-number">{emoji.value}</span>
         </button>
       ))}
     </div>
-    {value && (
-      <p className="text-center text-sm font-medium text-gray-500">
-        {EMOJIS.find((e) => e.value === value)?.description}
-      </p>
-    )}
+    <p className={`rating-caption ${value ? "has-rating" : ""}`} aria-live="polite">
+      {value ? `${value} / 5 — ${value <= 2 ? "À améliorer" : value === 3 ? "Satisfaisant" : value === 4 ? "Très bien" : "Excellent"}` : "Choisis une note"}
+    </p>
     {error && (
-      <span className="text-sm text-red-500 font-medium text-center block">{error}</span>
+      <span className="field-error">{error}</span>
     )}
   </div>
 );
@@ -266,39 +267,32 @@ const EmojiRating = ({ value, onChange, error }) => (
 const PromoCodeCard = ({ code }) => {
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard?.writeText(code).then(() => {
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
-    });
+    } catch { setCopied(false); }
   };
 
   return (
-    <div className="mt-5 rounded-2xl border-2 border-dashed border-[#ffcc00] bg-amber-50 p-5 space-y-3">
-      <p className="text-center text-xs font-bold uppercase tracking-widest text-amber-600">
-        Ton code promo
-      </p>
+    <div className="promo-card">
+      <p className="field-label">Ton code cadeau</p>
       <button
         type="button"
         onClick={handleCopy}
-        className="w-full flex items-center justify-between gap-3 bg-white hover:bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 transition-colors group"
+        className="promo-copy"
+        aria-label={`Copier le code ${code}`}
       >
-        <span className="text-2xl font-mono font-bold tracking-[0.15em] text-[#010006]">
+        <span className="promo-code">
           {code}
         </span>
-        <span
-          className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors shrink-0 ${
-            copied
-              ? "bg-green-100 text-green-600"
-              : "bg-gray-100 text-gray-500 group-hover:bg-amber-100 group-hover:text-amber-700"
-          }`}
-        >
-          {copied ? "✓ Copié !" : "Copier"}
+        <span className="copy-action" aria-live="polite">
+          {copied ? <IoCheckmark aria-hidden="true" /> : <IoCopyOutline aria-hidden="true" />}
+          {copied ? "Copié" : "Copier"}
         </span>
       </button>
-      <p className="text-center text-xs text-gray-500 leading-relaxed">
-        Montre ce code à ton coiffeur lors de ta prochaine visite
-      </p>
+      <p className="footnote">À présenter au salon lors de ta prochaine visite. Utilisable une seule fois.</p>
     </div>
   );
 };
@@ -308,30 +302,35 @@ const WinMessage = ({ reward, promoCode }) => {
   return (
     <>
       {isWin && <Confetti />}
-      <div className="py-2 space-y-4">
-        <div
-          className={`bg-linear-to-br ${reward.color} text-white rounded-3xl p-8 shadow-xl text-center transition-transform duration-500 ${
-            isWin ? "scale-[1.03]" : ""
-          }`}
-        >
-          <div className="text-7xl mb-4">{reward.emoji}</div>
-          <h2 className="text-2xl font-bold mb-1">
-            {isWin ? "🎉 Félicitations !" : "Dommage !"}
-          </h2>
-          <p className="text-xl font-bold mb-3">{reward.title}</p>
-          <p className="text-sm opacity-90 leading-relaxed">{reward.description}</p>
+      <div className="result-screen">
+        <div className="result-symbol" aria-hidden="true">{isWin ? <IoGiftOutline /> : <IoHeartOutline />}</div>
+        <div className="result-heading">
+          <p className="section-label">{isWin ? "Un cadeau pour toi" : "Ton avis fait la différence"}</p>
+          <h1 className="screen-title">{isWin ? "C’est ton jour." : "Merci à toi."}</h1>
+          <h2 className="reward-title">{reward.title}</h2>
+          <p className="screen-description">{reward.description}</p>
         </div>
         {isWin ? (
           <PromoCodeCard code={promoCode} />
         ) : (
-          <p className="text-center text-sm text-gray-500 pt-2">
-            Continue à nous soutenir et tente ta chance la prochaine fois ! 💪
-          </p>
+          <p className="footnote">On sera heureux de te retrouver pour ta prochaine coupe.</p>
         )}
       </div>
     </>
   );
 };
+
+function eraseScratch(canvas, brushSize, clientX, clientY) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const x = ((clientX - rect.left) * canvas.width) / rect.width / dpr;
+  const y = ((clientY - rect.top) * canvas.height) / rect.height / dpr;
+  ctx.beginPath();
+  ctx.arc(x, y, brushSize, 0, Math.PI * 2);
+  ctx.fill();
+}
 
 const ScratchCard = ({ width = 300, height = 300, finishPercent = 40, onComplete, brushSize = 32, children }) => {
   const [isComplete, setIsComplete] = useState(false);
@@ -340,7 +339,9 @@ const ScratchCard = ({ width = 300, height = 300, finishPercent = 40, onComplete
   const isCompleteRef = useRef(false);
   const isScratching = useRef(false);
   const onCompleteRef = useRef(onComplete);
-  onCompleteRef.current = onComplete;
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -352,85 +353,62 @@ const ScratchCard = ({ width = 300, height = 300, finishPercent = 40, onComplete
     ctx.scale(dpr, dpr);
 
     const gradient = ctx.createLinearGradient(0, 0, width, height);
-    gradient.addColorStop(0, "#d4d4d4");
-    gradient.addColorStop(0.5, "#b0b0b0");
-    gradient.addColorStop(1, "#d4d4d4");
+    gradient.addColorStop(0, "#e8e9ed");
+    gradient.addColorStop(0.45, "#f5f5f7");
+    gradient.addColorStop(1, "#d5d7dc");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
 
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
-    ctx.lineWidth = 0.5;
-    for (let x = 0; x < width; x += 10) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
-    }
-    for (let y = 0; y < height; y += 10) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
-    }
-
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
-    ctx.font = "bold 17px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#48484c";
+    ctx.font = "500 17px -apple-system, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("✨ GRATTE ICI ✨", width / 2, height / 2 - 12);
-    ctx.font = "13px Inter, system-ui, sans-serif";
-    ctx.fillStyle = "rgba(255,255,255,0.65)";
-    ctx.fillText("Découvre ton lot", width / 2, height / 2 + 14);
+    ctx.fillText("Glisse pour découvrir", width / 2, height / 2 - 8);
+    ctx.font = "13px -apple-system, system-ui, sans-serif";
+    ctx.fillStyle = "#68686d";
+    ctx.fillText("Un cadeau se cache peut-être ici", width / 2, height / 2 + 20);
 
     ctx.globalCompositeOperation = "destination-out";
   }, [width, height]);
-
-  const scratch = (clientX, clientY) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    const x = ((clientX - rect.left) * canvas.width) / rect.width / dpr;
-    const y = ((clientY - rect.top) * canvas.height) / rect.height / dpr;
-    ctx.beginPath();
-    ctx.arc(x, y, brushSize, 0, Math.PI * 2);
-    ctx.fill();
-  };
-
-  const checkPercentage = () => {
-    if (isCompleteRef.current) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    let transparent = 0;
-    const step = 16;
-    for (let i = 3; i < data.length; i += step) {
-      if (data[i] < 128) transparent++;
-    }
-    const pct = (transparent / (data.length / step)) * 100;
-    if (pct >= finishPercent) {
-      isCompleteRef.current = true;
-      setIsComplete(true);
-      onCompleteRef.current?.();
-    }
-  };
 
   const handleDown = (e) => {
     if (isCompleteRef.current) return;
     isScratching.current = true;
     if (!hasStarted) setHasStarted(true);
     const touch = e.touches?.[0];
-    scratch(touch ? touch.clientX : e.clientX, touch ? touch.clientY : e.clientY);
+    eraseScratch(canvasRef.current, brushSize, touch ? touch.clientX : e.clientX, touch ? touch.clientY : e.clientY);
   };
 
-  // Enregistre les listeners une seule fois — les fonctions accèdent aux refs, pas à des closures stales
   useEffect(() => {
+    let timer;
+    const checkPercentage = () => {
+      if (isCompleteRef.current) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let transparent = 0;
+      const stride = 16;
+      for (let i = 3; i < data.length; i += stride) {
+        if (data[i] < 128) transparent++;
+      }
+      if ((transparent / (data.length / stride)) * 100 >= finishPercent) {
+        isCompleteRef.current = true;
+        setIsComplete(true);
+        onCompleteRef.current?.();
+      }
+    };
     const handleMove = (e) => {
       if (!isScratching.current || isCompleteRef.current) return;
       e.preventDefault();
       const touch = e.touches?.[0];
-      scratch(touch ? touch.clientX : e.clientX, touch ? touch.clientY : e.clientY);
+      eraseScratch(canvasRef.current, brushSize, touch ? touch.clientX : e.clientX, touch ? touch.clientY : e.clientY);
     };
     const handleUp = () => {
       if (isScratching.current) {
         isScratching.current = false;
-        setTimeout(checkPercentage, 80);
+        clearTimeout(timer);
+        timer = setTimeout(checkPercentage, 80);
       }
     };
     window.addEventListener("mousemove", handleMove);
@@ -438,24 +416,23 @@ const ScratchCard = ({ width = 300, height = 300, finishPercent = 40, onComplete
     window.addEventListener("touchmove", handleMove, { passive: false });
     window.addEventListener("touchend", handleUp);
     return () => {
+      clearTimeout(timer);
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
       window.removeEventListener("touchmove", handleMove);
       window.removeEventListener("touchend", handleUp);
     };
-  }, []);
+  }, [brushSize, finishPercent]);
 
   return (
-    <div className="flex flex-col items-center gap-3 w-full">
+    <div className="scratch-control">
       <p
-        className={`text-sm text-gray-400 flex items-center gap-1.5 transition-opacity duration-300 ${
-          hasStarted || isComplete ? "opacity-0" : "opacity-100 animate-pulse"
-        }`}
+        className={`scratch-hint ${hasStarted || isComplete ? "is-hidden" : ""}`}
       >
-        <span>👆</span> Gratte avec ton doigt ou ta souris
+        Gratte avec ton doigt ou ta souris
       </p>
       <div
-        className="border-4 border-gray-200 rounded-2xl shadow-xl overflow-hidden relative"
+        className="scratch-surface"
         style={{
           width: `min(85vw, ${width}px)`,
           height: `min(85vw, ${height}px)`,
@@ -467,6 +444,7 @@ const ScratchCard = ({ width = 300, height = 300, finishPercent = 40, onComplete
         <div className="absolute inset-0">{children}</div>
         <canvas
           ref={canvasRef}
+          aria-label="Carte à gratter Beaufort. Le bouton ci-dessous permet aussi de découvrir le résultat."
           onMouseDown={handleDown}
           onTouchStart={(e) => { e.preventDefault(); handleDown(e); }}
           style={{
@@ -483,20 +461,45 @@ const ScratchCard = ({ width = 300, height = 300, finishPercent = 40, onComplete
           }}
         />
       </div>
+      <button type="button" className="text-button" onClick={() => onCompleteRef.current?.()}>Révéler sans gratter</button>
     </div>
   );
 };
 
 
 function App() {
+  const [participationId, setParticipationId] = useState(loadParticipationId);
+  const [checkingParticipation, setCheckingParticipation] = useState(() => Boolean(loadParticipationId()));
+  const [busy, setBusy] = useState(false);
+  const [requestError, setRequestError] = useState("");
+  const [revealStarted, setRevealStarted] = useState(false);
+  const savingRef = useRef(false);
   const [step, setStep] = useState(1);
   const [selectedGeneration, setSelectedGeneration] = useState("");
-  const [rating, setRating] = useState(null);
+  const [ratings, setRatings] = useState({ coupe: null, accueil: null, attente: null });
+  const [discoverySource, setDiscoverySource] = useState("");
   const [wonReward, setWonReward] = useState(null);
   const [scratchDone, setScratchDone] = useState(false);
-  const [promoCode] = useState(generatePromoCode);
+  const [promoCode, setPromoCode] = useState("");
 
-  const { register, handleSubmit, formState: { errors }, watch } = useForm();
+  const { register, handleSubmit, formState: { errors }, getValues, reset } = useForm();
+
+  const startNewGame = () => {
+    if (savingRef.current || busy) return;
+    const id = crypto.randomUUID();
+    try { localStorage.setItem(PARTICIPATION_KEY, id); } catch { /* La nouvelle partie reste disponible en mémoire. */ }
+    setParticipationId(id);
+    reset();
+    setSelectedGeneration("");
+    setRatings({ coupe: null, accueil: null, attente: null });
+    setDiscoverySource("");
+    setWonReward(null);
+    setPromoCode("");
+    setScratchDone(false);
+    setRevealStarted(false);
+    setRequestError("");
+    setStep(1);
+  };
 
   const goNext = () => setStep((s) => s + 1);
   const goBack = () => setStep((s) => Math.max(s - 1, 1));
@@ -508,131 +511,201 @@ function App() {
     { id: "4155", label: "Adulte Mature (41 - 55 ans)", value: "Adulte Mature (41 - 55 ans)" },
   ];
 
-  const getRandomReward = () => {
-    const r = Math.random();
-    let cum = 0;
-    for (const reward of REWARDS) {
-      cum += reward.probability;
-      if (r <= cum) return reward;
-    }
-    return REWARDS[REWARDS.length - 1];
-  };
+  useEffect(() => {
+    const id = loadParticipationId();
+    if (!id) return;
+    let cancelled = false;
+    participationRequest({ action: 'status', participationId: id }).then((result) => {
+      if (cancelled) return;
+      if (result.saved) {
+        setStep(6);
+        if (result.revealed) {
+          setWonReward(REWARDS.find((reward) => reward.id === result.rewardId));
+          setPromoCode(result.codePromo || "");
+          setScratchDone(true);
+        }
+      }
+      setCheckingParticipation(false);
+    }).catch((error) => {
+      if (!cancelled) setRequestError(error.message);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleScratchComplete = async () => {
-    const reward = getRandomReward();
-    setWonReward(reward);
-    setScratchDone(true);
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setRevealStarted(true);
+    setBusy(true);
+    setRequestError("");
+    try {
+      const result = await participationRequest({ action: 'reveal', participationId });
+      const reward = REWARDS.find((item) => item.id === result.rewardId);
+      if (!reward) throw new Error("Résultat indisponible. Réessaie.");
+      setWonReward(reward);
+      setPromoCode(result.codePromo || "");
+      setScratchDone(true);
+    } catch (error) {
+      setRequestError(error.message);
+    } finally {
+      savingRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const saveFeedback = async () => {
+    if (!discoverySource || savingRef.current) return;
+    savingRef.current = true;
+    setBusy(true);
+    setRequestError("");
+    const id = participationId || crypto.randomUUID();
+    setParticipationId(id);
+    try { localStorage.setItem(PARTICIPATION_KEY, id); } catch { /* Sheets conserve chaque partie par identifiant. */ }
 
     const payload = {
-      nomPrenom: watch("fullName"),
-      contact: watch("whatsapp"),
+      action: 'save',
+      participationId: id,
+      nomPrenom: getValues("fullName"),
+      contact: getValues("whatsapp"),
       trancheAge: selectedGeneration,
-      noteEmoji: EMOJIS.find((e) => e.value === rating)?.label ?? "",
-      avis: watch("feedback") ?? "",
-      recompense: reward.title,
-      codePromo: reward.id !== 0 ? promoCode : "",
-      date: new Date().toISOString(),
+      noteEmoji: EMOJIS.find((e) => e.value === ratings.coupe)?.label ?? "",
+      noteCoupe: ratings.coupe,
+      noteAccueil: ratings.accueil,
+      noteAttente: ratings.attente,
+      sourceDecouverte: discoverySource,
+      avis: getValues("feedback") ?? "",
     };
 
     try {
-      await fetch(WEBHOOK_URL, {
-        method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    } catch {
-      // no-cors : pas de corps de réponse, échec silencieux
+      const result = await participationRequest(payload);
+      if (!result.saved) throw new Error("Ton avis n’a pas pu être enregistré. Réessaie.");
+      setStep(6);
+      if (result.revealed) {
+        setWonReward(REWARDS.find((item) => item.id === result.rewardId));
+        setPromoCode(result.codePromo || "");
+        setScratchDone(true);
+      }
+    } catch (error) {
+      setRequestError(error.message);
+    } finally {
+      savingRef.current = false;
+      setBusy(false);
     }
   };
 
   return (
-    // Fond sombre sur desktop, blanc sur mobile
-    <div className="min-h-screen bg-white md:bg-neutral-950 md:flex md:items-center md:justify-center md:p-6">
-      {/* Carte principale */}
-      <div className="w-full md:max-w-md md:rounded-4xl md:overflow-hidden md:shadow-2xl md:shadow-black/60 bg-white">
+    <div className="app-stage">
+      <main className="app-shell" aria-label="Satisfaction client Beaufort" aria-busy={busy}>
+        {busy && (
+          <div className="loading-overlay">
+            <div className="loading-panel" role="status" aria-live="polite" aria-atomic="true">
+              <span className="loading-spinner" aria-hidden="true" />
+              <h2>{step === 6 ? "On prépare ton résultat…" : "On enregistre ton avis…"}</h2>
+              <p>{step === 6 ? "Encore un instant pour découvrir ta surprise." : "Encore un instant, ta carte arrive."}</p>
+            </div>
+          </div>
+        )}
 
         {/* Étape 1 — Accueil */}
-        {step === 1 && (
-          <div
-            className="relative flex flex-col justify-end bg-cover bg-center bg-no-repeat"
-            style={{
-              backgroundImage: "url('/banner.jpg')",
-              height: "100svh",
-            }}
-          >
-            <div className="absolute inset-0 bg-linear-to-b from-transparent via-black/20 to-black/88" />
-            <div className="relative z-10 px-7 pb-14 pt-8 flex flex-col items-center gap-6">
-              <div className="text-center space-y-3">
-                <h1 className="text-4xl font-extrabold text-white leading-tight tracking-tight">
-                  Prêt à tenter<br />ta chance ?
-                </h1>
-                <p className="text-white/75 text-base leading-relaxed max-w-xs mx-auto">
-                  Bienvenue au Beaufort Barbershop. Réponds à quelques questions et tente de gagner des lots.
-                </p>
+        {checkingParticipation ? (
+          <div className="connection-state" role="status">
+            <div className="loading-placeholder" aria-hidden="true"><span /><span /><span /></div>
+            <p>{requestError || "On retrouve ta participation…"}</p>
+            {requestError && <Button onClick={() => window.location.reload()}>Réessayer</Button>}
+          </div>
+        ) : step === 1 && (
+          <div className="welcome-screen">
+            <header className="welcome-nav">
+              <span className="brand-mark" aria-hidden="true"><IoCutOutline /></span>
+              <span>Le Beaufort <span className="brand-subtitle">Barbershop</span></span>
+            </header>
+            <div className="welcome-content">
+              <div className="welcome-photo">
+                <img className="salon-photo" src="/banner.jpg" alt="Une coupe au barbershop" />
+                <img className="photo-logo" src="/logo.png" alt="Le Beaufort Barbershop" />
               </div>
-              <Button onClick={goNext}>Jouer maintenant</Button>
+              <div className="welcome-heading">
+                <p className="section-label">Bienvenue chez toi</p>
+                <h1>Une belle coupe.<br />Ton avis compte.</h1>
+                <p className="screen-description">Raconte-nous ta visite. Aide-nous à faire encore mieux, puis tente de gagner un cadeau.</p>
+              </div>
+              <div className="welcome-gift">
+                <IoGiftOutline aria-hidden="true" />
+                <div><strong>Une petite surprise t’attend.</strong><span>Donne ton avis, puis gratte ta carte.</span></div>
+              </div>
+            </div>
+            <div className="welcome-action">
+              <Button onClick={goNext}>Donner mon avis</Button>
+              <p className="footnote">Tu peux participer plusieurs fois.<br />Tes notes n’influencent pas le tirage.</p>
             </div>
           </div>
         )}
 
         {/* Étapes 2–6 */}
-        {step >= 2 && step <= 6 && (
-          <div className="flex flex-col" style={{ minHeight: "100svh" }}>
-            <StepHeader step={step} onBack={goBack} />
+        {!checkingParticipation && step >= 2 && step <= 6 && (
+          <div className="flow-screen">
+            <StepHeader step={step} onBack={step === 6 || busy ? undefined : goBack} />
 
-            <div className="flex-1 overflow-y-auto px-6 pb-10 pt-6 space-y-6">
+            <div key={step} className="flow-content">
+              {requestError && <div role="alert" className="error-message"><IoAlertCircleOutline aria-hidden="true" /><p>{requestError}</p></div>}
 
-              {/* Étape 2 — Infos personnelles */}
-              {step === 2 && (
+              {/* Étape 5 — Coordonnées avant le jeu */}
+              {step === 5 && (
                 <>
-                  <div className="space-y-1">
-                    <h1 className="text-2xl font-bold text-[#010006]">Faisons connaissance 👋</h1>
-                    <p className="text-sm text-gray-500">
-                      Renseigne tes infos pour participer et récupérer ton cadeau.
+                  <div className="screen-heading">
+                    <p className="section-label">Avant ta surprise</p>
+                    <h1 className="screen-title">À qui envoyer<br />le résultat ?</h1>
+                    <p className="screen-description">
+                      Ton prénom et ton WhatsApp pour t’envoyer ton résultat et ton code cadeau si tu gagnes.
                     </p>
                   </div>
-                  <form onSubmit={handleSubmit(goNext)} className="space-y-4">
+                  <form onSubmit={handleSubmit(saveFeedback)} className="flow-form">
+                    <div className="form-fields">
                     <Input
-                      label="Nom & Prénoms"
+                      label="Prénom"
                       type="text"
-                      placeholder="Ex : Yao Kouamé Junior"
+                      autoComplete="given-name"
+                      placeholder="Ex : Yao"
                       {...register("fullName", {
-                        required: "Le nom est requis",
-                        minLength: { value: 3, message: "Minimum 3 caractères" },
+                        required: "Ton prénom est requis",
+                        minLength: { value: 2, message: "Minimum 2 caractères" },
                       })}
                       error={errors.fullName?.message}
                     />
                     <Input
                       label="Numéro WhatsApp"
-                      icon={<IoLogoWhatsapp className="size-5 text-green-500 shrink-0" />}
+                      icon={<IoLogoWhatsapp />}
                       type="tel"
+                      autoComplete="tel"
                       placeholder="Ex : +225 05 05 05 05 05"
                       {...register("whatsapp", {
                         required: "Le numéro WhatsApp est requis",
-                        pattern: { value: /^[0-9+\s\-()]+$/, message: "Numéro invalide" },
+                        validate: (value) => /^\+?[0-9\s\-()]+$/.test(value) && value.replace(/\D/g, '').length >= 8 && value.replace(/\D/g, '').length <= 15 || "Numéro invalide",
                       })}
                       error={errors.whatsapp?.message}
                     />
-                    <div className="pt-2">
-                      <Button type="submit">Continuer</Button>
+                    <p className="field-help">Ton résultat sera aussi affiché ici après le grattage.</p>
+                    </div>
+                    <div className="form-action">
+                      <Button type="submit" disabled={busy}>{busy ? "Enregistrement…" : "Envoyer mon avis et jouer"}</Button>
                     </div>
                   </form>
                 </>
               )}
 
-              {/* Étape 3 — Tranche d'âge */}
-              {step === 3 && (
+              {/* Étape 4 — Tranche d’âge facultative */}
+              {step === 4 && (
                 <>
-                  <div className="space-y-1">
-                    <h1 className="text-2xl font-bold text-[#010006]">Ta tranche d'âge ?</h1>
-                    <p className="text-sm text-gray-500">Sélectionne la catégorie qui te correspond.</p>
+                  <div className="screen-heading">
+                    <p className="section-label">Un peu de toi</p>
+                    <h1 className="screen-title">Ta tranche<br />d’âge.</h1>
+                    <p className="screen-description">Facultatif : cela nous aide à mieux connaître les visiteurs du salon.</p>
                   </div>
                   <form
-                    onSubmit={(e) => { e.preventDefault(); if (selectedGeneration) goNext(); }}
-                    className="space-y-4"
+                    onSubmit={(e) => { e.preventDefault(); goNext(); }}
+                    className="flow-form"
                   >
-                    <div className="space-y-3">
+                    <div className="grouped-list" role="group" aria-label="Tranche d’âge">
                       {generations.map((g) => (
                         <RadioButton
                           key={g.id}
@@ -645,49 +718,79 @@ function App() {
                         />
                       ))}
                     </div>
-                    <div className="pt-2">
-                      <Button type="submit" disabled={!selectedGeneration}>Continuer</Button>
+                    <div className="form-action">
+                      <Button type="submit">Continuer</Button>
+                      <button type="button" className="text-button" onClick={() => { setSelectedGeneration(""); goNext(); }}>Je préfère ne pas répondre</button>
                     </div>
                   </form>
                 </>
               )}
 
-              {/* Étape 4 — Note emoji */}
-              {step === 4 && (
+              {/* Étape 2 — Avis en premier */}
+              {step === 2 && (
                 <>
-                  <div className="space-y-1">
-                    <h1 className="text-2xl font-bold text-[#010006]">On t'a bien coiffé ? 😎</h1>
-                    <p className="text-sm text-gray-500">Dis-nous ce que tu penses de ta nouvelle coupe.</p>
+                  <div className="screen-heading">
+                    <p className="section-label">Ton expérience</p>
+                    <h1 className="screen-title">Alors,<br />c’était comment ?</h1>
+                    <p className="screen-description">De 1 « à améliorer » à 5 « excellent ».<br />Ton ressenti, tout simplement.</p>
                   </div>
                   <form
-                    onSubmit={(e) => { e.preventDefault(); if (rating) goNext(); }}
-                    className="space-y-6"
+                    onSubmit={(e) => { e.preventDefault(); if (RATING_CRITERIA.every(({ key }) => ratings[key])) goNext(); }}
+                    className="flow-form"
                   >
-                    <EmojiRating value={rating} onChange={setRating} />
-                    <div className="pt-2">
-                      <Button type="submit" disabled={!rating}>Continuer</Button>
+                    <div className="ratings-group">
+                    {RATING_CRITERIA.map(({ key, label, description }) => (
+                      <fieldset key={key} className="rating-fieldset">
+                        <legend className="rating-label">{label}</legend>
+                        <p className="rating-description">{description}</p>
+                        <EmojiRating
+                          value={ratings[key]}
+                          onChange={(value) => setRatings((previous) => ({ ...previous, [key]: value }))}
+                        />
+                      </fieldset>
+                    ))}
+                    </div>
+                    <div className="form-action">
+                      <Button type="submit" disabled={!RATING_CRITERIA.every(({ key }) => ratings[key])}>Continuer</Button>
                     </div>
                   </form>
                 </>
               )}
 
-              {/* Étape 5 — Feedback */}
-              {step === 5 && (
+              {/* Étape 3 — Feedback */}
+              {step === 3 && (
                 <>
-                  <div className="space-y-1">
-                    <h1 className="text-2xl font-bold text-[#010006]">Ton opinion compte !</h1>
-                    <p className="text-sm text-gray-500">
-                      Dis-nous ce qu'on peut améliorer.{" "}
-                      <span className="text-gray-400">(facultatif)</span>
-                    </p>
+                  <div className="screen-heading">
+                    <p className="section-label">Un dernier mot</p>
+                    <h1 className="screen-title">On t’écoute.</h1>
+                    <p className="screen-description">Dis-nous comment tu nous as connus, et ce qu’on peut améliorer.</p>
                   </div>
-                  <form onSubmit={handleSubmit(goNext)} className="space-y-4">
+                  <form onSubmit={(e) => { e.preventDefault(); if (discoverySource) goNext(); }} className="flow-form">
+                    <div className="form-fields">
+                    <fieldset className="discovery-fieldset">
+                      <legend className="field-label">Comment as-tu connu Beaufort ?</legend>
+                      <div className="grouped-list">
+                      {DISCOVERY_SOURCES.map((source, index) => (
+                        <RadioButton
+                          key={source}
+                          id={`discovery-${index}`}
+                          name="discovery"
+                          value={source}
+                          label={source}
+                          checked={discoverySource === source}
+                          onChange={(e) => setDiscoverySource(e.target.value)}
+                        />
+                      ))}
+                      </div>
+                    </fieldset>
                     <Textarea
-                      placeholder="Ex : Le service a été rapide, j'aimerais que vous ajoutiez…"
+                      placeholder="Ce que tu as aimé, une idée, une petite chose à améliorer…"
+                      maxLength={5000}
                       {...register("feedback")}
                     />
-                    <div className="pt-2">
-                      <Button type="submit">Envoyer</Button>
+                    </div>
+                    <div className="form-action">
+                      <Button type="submit" disabled={!discoverySource}>Continuer</Button>
                     </div>
                   </form>
                 </>
@@ -696,16 +799,22 @@ function App() {
               {/* Étape 6 — Carte à gratter */}
               {step === 6 && (
                 <>
-                  {!scratchDone && (
-                    <div className="space-y-1">
-                      <h1 className="text-2xl font-bold text-[#010006]">Gratte et découvre !</h1>
-                      <p className="text-sm text-gray-500">
-                        Il suffit de gratter… et peut-être repartir avec un lot.
+                  {!scratchDone && !revealStarted && (
+                    <div className="screen-heading">
+                      <p className="saved-label"><IoCheckmark aria-hidden="true" /> Ton avis est enregistré</p>
+                      <h1 className="screen-title">À toi<br />de découvrir.</h1>
+                      <p className="screen-description">
+                        Un geste du doigt, et la surprise se révèle.
                       </p>
                     </div>
                   )}
-                  {!scratchDone ? (
-                    <div className="flex justify-center py-4">
+                  {!scratchDone && revealStarted ? (
+                    <div className="connection-state" role="status">
+                      <p>{busy ? "On récupère ton résultat…" : "Ton résultat est conservé. Tu peux le récupérer sans refaire de tirage."}</p>
+                      {!busy && <Button onClick={handleScratchComplete}>Afficher mon résultat</Button>}
+                    </div>
+                  ) : !scratchDone ? (
+                    <div className="scratch-section">
                       <ScratchCard
                         width={300}
                         height={300}
@@ -713,13 +822,15 @@ function App() {
                         brushSize={32}
                         onComplete={handleScratchComplete}
                       >
-                        <div className="w-full h-full flex items-center justify-center bg-linear-to-br from-amber-400 to-yellow-500 text-7xl">
-                          🎁
-                        </div>
+                        <div className="scratch-underlay"><IoGiftOutline aria-hidden="true" /><span>Ta surprise Beaufort</span></div>
                       </ScratchCard>
                     </div>
                   ) : (
-                    wonReward && <WinMessage reward={wonReward} promoCode={promoCode} />
+                    wonReward && <>
+                      <WinMessage reward={wonReward} promoCode={promoCode} />
+                      <ShareResult />
+                      <div className="form-action"><Button onClick={startNewGame}>Rejouer</Button></div>
+                    </>
                   )}
                 </>
               )}
@@ -728,7 +839,7 @@ function App() {
           </div>
         )}
 
-      </div>
+      </main>
     </div>
   );
 }

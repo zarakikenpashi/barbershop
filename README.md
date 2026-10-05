@@ -1,18 +1,23 @@
-# React + Vite
+# Beaufort Barbershop
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Application de satisfaction client pour Le BeauFORT BarberShop. Le parcours commence par trois notes (coupe, accueil, attente), la source de découverte et un commentaire facultatif. La tranche d’âge est facultative ; le prénom et le WhatsApp sont demandés juste avant le jeu. L’avis est enregistré avant le grattage. Le résultat propose un partage sur WhatsApp ou ailleurs, sans coordonnées ni code cadeau.
 
-Currently, two official plugins are available:
+## Développement
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```sh
+npm install
+npm run dev
+npm test
+npm run lint
+npm run build
+```
 
-## React Compiler
+Le frontend utilise React, Vite et Tailwind CSS. Le dossier `api/` fournit l’API Vercel ; Vite fournit son équivalent en développement. Une prévisualisation statique (`npm run preview`) ne fournit pas cette API.
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+## Google Sheets et déploiement
 
-Note: This will impact Vite dev & build performances.
+Suivre [le guide d’installation](google-apps-script/INSTALLATION.md) et installer [le script Apps Script](google-apps-script/Code.gs) avant de déployer le frontend. Le webhook est fourni par la variable serveur `WEBHOOK_URL` (ou `VITE_WEBHOOK_URL` pour compatibilité).
 
-## Expanding the ESLint configuration
+Le tirage est effectué dans Apps Script et enregistré une seule fois par partie. Plusieurs parties sont autorisées avec le même numéro grâce au bouton Rejouer. Un identifiant conservé dans le navigateur permet de reprendre après rechargement. Les codes gagnants sont vérifiés et utilisés depuis le menu Le BeauFORT BarberShop dans Sheets. WhatsApp vérifie le compte destinataire et utilise uniquement des correspondances d’anciens numéros confirmées par le salon.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Les tests simulent les services Google : enregistrement, reprise, doublons, formats de téléphone, refus d’un lot imposé par le client, utilisation unique des codes et compatibilité du proxy. Une participation de test après déploiement reste nécessaire pour vérifier les accès réels.

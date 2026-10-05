@@ -96,7 +96,7 @@ function doGet(event) {
   }
   try {
     getResponseSheet();
-    return jsonResult({ ok: true, revision: 'repeat-play-v1', unlimitedPlays: true });
+    return jsonResult({ ok: true, revision: 'optional-age-v2', unlimitedPlays: true, optionalAge: true });
   } catch {
     return jsonResult({ ok: false, code: 'SETUP_REQUIRED', message: 'Le service de participation n’est pas encore configuré. Merci de prévenir le salon.' });
   }
@@ -158,10 +158,12 @@ function doPost(event) {
     if (!/^\+?[0-9\s()\-]+$/.test(String(data.contact || '')) || !/^\d{8,15}$/.test(phone) || String(data.nomPrenom || '').trim().length < 2) {
       return jsonResult({ ok: false, message: 'Vérifie ton nom et ton numéro WhatsApp.' });
     }
-    ['noteCoupe', 'noteAccueil', 'noteAttente'].forEach(function (key) {
-      if (!Number.isInteger(data[key]) || data[key] < 1 || data[key] > 5) throw new Error('Note invalide');
-    });
-    if (SOURCES.indexOf(data.sourceDecouverte) === -1) throw new Error('Réponse invalide');
+    if (['noteCoupe', 'noteAccueil', 'noteAttente'].some(function (key) {
+      return !Number.isInteger(data[key]) || data[key] < 1 || data[key] > 5;
+    })) return jsonResult({ ok: false, message: 'Choisis une note pour la coupe, l’accueil et le temps d’attente.' });
+    if (SOURCES.indexOf(data.sourceDecouverte) === -1) {
+      return jsonResult({ ok: false, message: 'Indique comment tu as connu le salon.' });
+    }
     // 4 % par cadeau, 80 % sans lot : le client ne décide ni du lot ni du code.
     const draw = Math.random();
     const prizeId = draw < 0.2 ? Math.floor(draw / 0.04) + 1 : 0;

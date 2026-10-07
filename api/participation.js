@@ -2,6 +2,7 @@ import process from 'node:process';
 
 const verifiedWebhooks = new Map();
 const HEALTH_CACHE_MS = 5 * 60 * 1000;
+const REQUIRED_SCRIPT_REVISION = 'identity-after-result-v5';
 
 export class ParticipationServiceError extends Error {
   constructor(code, message) {
@@ -47,6 +48,9 @@ export async function forwardParticipation(data, webhookUrl, request = fetch) {
       method: 'GET', signal,
     }));
     if (!health.ok) return health;
+    if (health.revision !== REQUIRED_SCRIPT_REVISION) {
+      throw new ParticipationServiceError('SCRIPT_UPDATE_REQUIRED', 'Le script Google Sheets configuré dans Vercel n’est pas à jour. Vérifie WEBHOOK_URL et redéploie le projet.');
+    }
     if (request === fetch) verifiedWebhooks.set(webhookUrl, Date.now() + HEALTH_CACHE_MS);
   }
   const response = await request(webhookUrl, {

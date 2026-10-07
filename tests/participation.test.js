@@ -175,7 +175,7 @@ test('proxy : reçoit une confirmation v2 et refuse un ancien script ou une erre
   const result = await forwardParticipation(feedback, url, async (target, options) => {
     if (options.method === 'GET') {
       assert.equal(target, url + '?action=health');
-      return { ok: true, json: async () => ({ version: 2, ok: true }) };
+      return { ok: true, json: async () => ({ version: 2, ok: true, revision: 'identity-after-result-v5' }) };
     }
     assert.equal(target, url);
     assert.equal(JSON.parse(options.body).action, 'save');
@@ -183,6 +183,9 @@ test('proxy : reçoit une confirmation v2 et refuse un ancien script ou une erre
   });
   assert.equal(result.saved, true);
   await assert.rejects(forwardParticipation(feedback, url, async () => ({ ok: true, json: async () => ({ saved: true }) })), error => error.code === 'SCRIPT_UPDATE_REQUIRED');
+  await assert.rejects(forwardParticipation(feedback, url, async (_target, options) => options.method === 'GET'
+    ? {ok:true,json:async()=>({version:2,ok:true,revision:'identity-after-result-v4'})}
+    : {ok:true,json:async()=>({version:2,ok:true,saved:true})}), error => error.code === 'SCRIPT_UPDATE_REQUIRED');
   await assert.rejects(forwardParticipation(feedback, url, async () => ({ ok: false })), error => error.code === 'GOOGLE_ACCESS');
   await assert.rejects(forwardParticipation(feedback, 'http://invalid'), /configuré/);
 });
@@ -201,6 +204,7 @@ test('diagnostic Apps Script v2 : contrôle sans ligne ni tirage', () => {
   const response = JSON.parse(app.context.doGet({ parameter: { action: 'health' } }));
   assert.equal(response.ok, true);
   assert.equal(response.version, 2);
+  assert.equal(response.revision, 'identity-after-result-v5');
   assert.equal(app.rows.length, 0);
   assert.equal(app.draws(), 0);
 });
@@ -235,7 +239,9 @@ test('un seul budget de temps pour le contrôle Google et la participation', asy
   await forwardParticipation(feedback, 'https://script.google.com/macros/s/test/exec', async (_url, options) => {
     if (options.method === 'GET') firstSignal = options.signal;
     else assert.equal(options.signal, firstSignal);
-    return {ok:true,json:async () => ({version:2,ok:true,saved:true})};
+    return {ok:true,json:async () => options.method === 'GET'
+      ? ({version:2,ok:true,revision:'identity-after-result-v5'})
+      : ({version:2,ok:true,saved:true})};
   });
   assert.equal(participationFailure({name:'TimeoutError'}).code, 'GOOGLE_TIMEOUT');
   assert.match(participationFailure({name:'AbortError'}).message, /pas comptée deux fois/);

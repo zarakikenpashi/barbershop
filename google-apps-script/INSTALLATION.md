@@ -24,7 +24,7 @@ Le script v2 est indispensable : l’API refuse une réponse d’un ancien scrip
 
 ## Erreur d’enregistrement
 
-Le serveur vérifie d’abord l’URL `/exec?action=health` avec une requête GET sans écriture. Le script à jour doit retourner `{"version":2,"ok":true}`. Une page HTML « Fonction de script introuvable : doGet » signifie que le déploiement n’inclut pas le script fourni ici. Copier le fichier complet, exécuter setupBeaufort, puis modifier le déploiement existant avec **Nouvelle version** ; enregistrer le code dans l’éditeur seul ne met pas l’application Web à jour.
+Le serveur vérifie d’abord l’URL `/exec?action=health` avec une requête GET sans écriture. Le script à jour doit retourner `{"version":2,"ok":true,"revision":"identity-after-result-v5"}`. Le proxy Vercel bloque tout ancien déploiement avant d’envoyer une participation. Une page HTML « Fonction de script introuvable : doGet » signifie que le déploiement n’inclut pas le script fourni ici. Copier le fichier complet, exécuter setupBeaufort, puis modifier le déploiement existant avec **Nouvelle version** ; enregistrer le code dans l’éditeur seul ne met pas l’application Web à jour.
 
 Le diagnostic `SETUP_REQUIRED` indique que setupBeaufort n’a pas été exécuté ou que les colonnes attendues manquent. `SCRIPT_UPDATE_REQUIRED` indique un script incompatible ou une réponse Google non JSON. `GOOGLE_ACCESS` indique une réponse HTTP d’erreur : vérifier le déploiement et les autorisations. Ces codes figurent dans le terminal local / les logs Vercel, sans coordonnées client.
 

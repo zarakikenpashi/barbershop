@@ -77,7 +77,7 @@ const REWARDS = [
   },
 ];
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 4;
 
 const RATING_CRITERIA = [
   { key: "coupe", label: "Ta coupe", description: "Le résultat te plaît ?" },
@@ -86,11 +86,15 @@ const RATING_CRITERIA = [
 ];
 const DISCOVERY_SOURCES = ["WhatsApp", "Instagram", "Un ami / bouche-à-oreille", "En passant devant le salon", "Autre"];
 
-const ShareResult = () => {
+const SALON_WHATSAPP = "22588405840";
+
+const ShareResult = ({ reward, promoCode, firstName, contactSaved }) => {
   const [shareNotice, setShareNotice] = useState("");
-  // Share only the public entry point, never a result, contact or gift code.
   const url = new URL('/', window.location.origin).href;
   const text = 'J’ai tenté ma chance chez Le BeauFORT BarberShop ✂️ À toi de jouer !';
+  const salonMessage = reward.id === 0
+    ? 'Bonjour Le BeauFORT BarberShop, je viens de participer à votre jeu. Merci !'
+    : `Bonjour Le BeauFORT BarberShop, c’est ${firstName}. J’ai gagné « ${reward.title} » avec le code ${promoCode}. Je vous le présente lors de ma prochaine visite. ✂️`;
   const shareElsewhere = async () => {
     setShareNotice("");
     try {
@@ -101,14 +105,20 @@ const ShareResult = () => {
         setShareNotice('Lien copié ! Colle-le dans le réseau de ton choix.');
       }
     } catch (error) {
-      if (error.name !== 'AbortError') setShareNotice('Partage indisponible. Tu peux utiliser le bouton WhatsApp.');
+      if (error.name !== 'AbortError') setShareNotice('Partage indisponible. Réessaie dans un instant.');
     }
   };
   return (
     <div className="result-share">
-      <p className="field-help">Invite tes amis à tenter leur chance.</p>
+      {reward.id !== 0 && (
+        <a className={`app-button button-secondary${contactSaved ? '' : ' is-disabled'}`} aria-disabled={!contactSaved} href={contactSaved ? 'https://wa.me/' + SALON_WHATSAPP + '?text=' + encodeURIComponent(salonMessage) : undefined} target="_blank" rel="noopener noreferrer" onClick={(event) => { if (!contactSaved) event.preventDefault(); }}>
+          <IoLogoWhatsapp aria-hidden="true" /> Écrire au salon sur WhatsApp
+        </a>
+      )}
+      <p className="field-help">Le résultat reste disponible ici. À toi de choisir si tu veux le partager.</p>
+      {reward.id !== 0 && !contactSaved && <p className="field-help">Enregistre d’abord tes coordonnées ci-dessus pour écrire au salon avec ton code.</p>}
       <a className="app-button button-secondary" href={'https://wa.me/?text=' + encodeURIComponent(text + '\n' + url)} target="_blank" rel="noopener noreferrer">
-        <IoLogoWhatsapp aria-hidden="true" /> Partager sur WhatsApp
+        <IoLogoWhatsapp aria-hidden="true" /> Inviter un proche sur WhatsApp
       </a>
       <button type="button" className="text-button" onClick={shareElsewhere}>Partager ailleurs</button>
       <p className="field-help" role="status" aria-live="polite">{shareNotice}</p>
@@ -482,7 +492,9 @@ function App() {
   const [scratchDone, setScratchDone] = useState(false);
   const [promoCode, setPromoCode] = useState("");
 
-  const { register, handleSubmit, formState: { errors }, getValues, reset } = useForm();
+  const { register, handleSubmit, formState: { errors }, getValues, reset, setValue } = useForm();
+  const [contactSaved, setContactSaved] = useState(false);
+  const [marketingConsent, setMarketingConsent] = useState(false);
 
   const startNewGame = () => {
     if (savingRef.current || busy) return;
@@ -495,6 +507,10 @@ function App() {
     setDiscoverySource("");
     setWonReward(null);
     setPromoCode("");
+    setContactSaved(false);
+    setMarketingConsent(false);
+    setValue('fullName', '');
+    setValue('whatsapp', '');
     setScratchDone(false);
     setRevealStarted(false);
     setRequestError("");
@@ -518,11 +534,15 @@ function App() {
     participationRequest({ action: 'status', participationId: id }).then((result) => {
       if (cancelled) return;
       if (result.saved) {
-        setStep(6);
+        setStep(5);
         if (result.revealed) {
           setWonReward(REWARDS.find((reward) => reward.id === result.rewardId));
           setPromoCode(result.codePromo || "");
           setScratchDone(true);
+          setValue('fullName', result.nomPrenom || '');
+          setValue('whatsapp', result.contact || '');
+          setContactSaved(Boolean(result.nomPrenom && result.contact));
+          setMarketingConsent(Boolean(result.marketingConsent));
         }
       }
       setCheckingParticipation(false);
@@ -530,7 +550,7 @@ function App() {
       if (!cancelled) setRequestError(error.message);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [setValue]);
 
   const handleScratchComplete = async () => {
     if (savingRef.current) return;
@@ -553,7 +573,7 @@ function App() {
     }
   };
 
-  const saveFeedback = async () => {
+  const saveFeedback = async (age = selectedGeneration) => {
     if (!discoverySource || savingRef.current) return;
     savingRef.current = true;
     setBusy(true);
@@ -565,9 +585,9 @@ function App() {
     const payload = {
       action: 'save',
       participationId: id,
-      nomPrenom: getValues("fullName"),
-      contact: getValues("whatsapp"),
-      trancheAge: selectedGeneration,
+      nomPrenom: "",
+      contact: "",
+      trancheAge: age,
       noteEmoji: EMOJIS.find((e) => e.value === ratings.coupe)?.label ?? "",
       noteCoupe: ratings.coupe,
       noteAccueil: ratings.accueil,
@@ -579,12 +599,38 @@ function App() {
     try {
       const result = await participationRequest(payload);
       if (!result.saved) throw new Error("Ton avis n’a pas pu être enregistré. Réessaie.");
-      setStep(6);
+      setStep(5);
       if (result.revealed) {
         setWonReward(REWARDS.find((item) => item.id === result.rewardId));
         setPromoCode(result.codePromo || "");
         setScratchDone(true);
+        setValue('fullName', result.nomPrenom || '');
+        setValue('whatsapp', result.contact || '');
+        setContactSaved(Boolean(result.nomPrenom && result.contact));
+        setMarketingConsent(Boolean(result.marketingConsent));
       }
+    } catch (error) {
+      setRequestError(error.message);
+    } finally {
+      savingRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const savePlayerProfile = async (values) => {
+    if (savingRef.current || !participationId) return;
+    savingRef.current = true;
+    setBusy(true);
+    setRequestError("");
+    try {
+      const result = await participationRequest({
+        action: 'profile', participationId,
+        nomPrenom: values.fullName.trim(), contact: values.whatsapp.trim(),
+        marketingConsent,
+      });
+      if (!result.saved || !result.revealed) throw new Error("Tes coordonnées n’ont pas pu être associées à ton résultat.");
+      setContactSaved(true);
+      setMarketingConsent(Boolean(result.marketingConsent));
     } catch (error) {
       setRequestError(error.message);
     } finally {
@@ -600,8 +646,8 @@ function App() {
           <div className="loading-overlay">
             <div className="loading-panel" role="status" aria-live="polite" aria-atomic="true">
               <span className="loading-spinner" aria-hidden="true" />
-              <h2>{step === 6 ? "On prépare ton résultat…" : "On enregistre ton avis…"}</h2>
-              <p>{step === 6 ? "Encore un instant pour découvrir ta surprise." : "Encore un instant, ta carte arrive."}</p>
+              <h2>{step === 5 ? "On prépare ton résultat…" : "On enregistre ton avis…"}</h2>
+              <p>{step === 5 ? "Encore un instant pour découvrir ta surprise." : "Encore un instant, ta carte arrive."}</p>
             </div>
           </div>
         )}
@@ -636,62 +682,18 @@ function App() {
             </div>
             <div className="welcome-action">
               <Button onClick={goNext}>Donner mon avis</Button>
-              <p className="footnote">Tu peux participer plusieurs fois.<br />Tes notes n’influencent pas le tirage.</p>
+              <p className="footnote">Tu peux participer plusieurs fois.<br />Si tu gagnes, ton nom complet et ton WhatsApp seront demandés pour réclamer ton cadeau.</p>
             </div>
           </div>
         )}
 
         {/* Étapes 2–6 */}
-        {!checkingParticipation && step >= 2 && step <= 6 && (
+        {!checkingParticipation && step >= 2 && step <= 5 && (
           <div className="flow-screen">
-            <StepHeader step={step} onBack={step === 6 || busy ? undefined : goBack} />
+            <StepHeader step={step} onBack={step === 5 || busy ? undefined : goBack} />
 
             <div key={step} className="flow-content">
               {requestError && <div role="alert" className="error-message"><IoAlertCircleOutline aria-hidden="true" /><p>{requestError}</p></div>}
-
-              {/* Étape 5 — Coordonnées avant le jeu */}
-              {step === 5 && (
-                <>
-                  <div className="screen-heading">
-                    <p className="section-label">Avant ta surprise</p>
-                    <h1 className="screen-title">À qui envoyer<br />le résultat ?</h1>
-                    <p className="screen-description">
-                      Ton prénom et ton WhatsApp pour t’envoyer ton résultat et ton code cadeau si tu gagnes.
-                    </p>
-                  </div>
-                  <form onSubmit={handleSubmit(saveFeedback)} className="flow-form">
-                    <div className="form-fields">
-                    <Input
-                      label="Prénom"
-                      type="text"
-                      autoComplete="given-name"
-                      placeholder="Ex : Yao"
-                      {...register("fullName", {
-                        required: "Ton prénom est requis",
-                        minLength: { value: 2, message: "Minimum 2 caractères" },
-                      })}
-                      error={errors.fullName?.message}
-                    />
-                    <Input
-                      label="Numéro WhatsApp"
-                      icon={<IoLogoWhatsapp />}
-                      type="tel"
-                      autoComplete="tel"
-                      placeholder="Ex : +225 05 05 05 05 05"
-                      {...register("whatsapp", {
-                        required: "Le numéro WhatsApp est requis",
-                        validate: (value) => /^\+?[0-9\s\-()]+$/.test(value) && value.replace(/\D/g, '').length >= 8 && value.replace(/\D/g, '').length <= 15 || "Numéro invalide",
-                      })}
-                      error={errors.whatsapp?.message}
-                    />
-                    <p className="field-help">Ton résultat sera aussi affiché ici après le grattage.</p>
-                    </div>
-                    <div className="form-action">
-                      <Button type="submit" disabled={busy}>{busy ? "Enregistrement…" : "Envoyer mon avis et jouer"}</Button>
-                    </div>
-                  </form>
-                </>
-              )}
 
               {/* Étape 4 — Tranche d’âge facultative */}
               {step === 4 && (
@@ -699,10 +701,10 @@ function App() {
                   <div className="screen-heading">
                     <p className="section-label">Un peu de toi</p>
                     <h1 className="screen-title">Ta tranche<br />d’âge.</h1>
-                    <p className="screen-description">Facultatif : cela nous aide à mieux connaître les visiteurs du salon.</p>
+                    <p className="screen-description">Facultatif : cela nous aide à mieux connaître les visiteurs du salon. Aucune coordonnée n’est demandée avant le jeu. Si tu gagnes, tu pourras réclamer ton cadeau en enregistrant ton nom complet et ton WhatsApp.</p>
                   </div>
                   <form
-                    onSubmit={(e) => { e.preventDefault(); goNext(); }}
+                    onSubmit={(e) => { e.preventDefault(); saveFeedback(); }}
                     className="flow-form"
                   >
                     <div className="grouped-list" role="group" aria-label="Tranche d’âge">
@@ -719,8 +721,8 @@ function App() {
                       ))}
                     </div>
                     <div className="form-action">
-                      <Button type="submit">Continuer</Button>
-                      <button type="button" className="text-button" onClick={() => { setSelectedGeneration(""); goNext(); }}>Je préfère ne pas répondre</button>
+                      <Button type="submit" disabled={busy}>{busy ? "Enregistrement…" : "Enregistrer mon avis et jouer"}</Button>
+                      <button type="button" className="text-button" disabled={busy} onClick={() => { setSelectedGeneration(""); saveFeedback(""); }}>Je préfère ne pas répondre</button>
                     </div>
                   </form>
                 </>
@@ -796,8 +798,8 @@ function App() {
                 </>
               )}
 
-              {/* Étape 6 — Carte à gratter */}
-              {step === 6 && (
+              {/* Étape 5 — Carte à gratter */}
+              {step === 5 && (
                 <>
                   {!scratchDone && !revealStarted && (
                     <div className="screen-heading">
@@ -828,8 +830,31 @@ function App() {
                   ) : (
                     wonReward && <>
                       <WinMessage reward={wonReward} promoCode={promoCode} />
-                      <ShareResult />
-                      <div className="form-action"><Button onClick={startNewGame}>Rejouer</Button></div>
+                      <form onSubmit={handleSubmit(savePlayerProfile)} className="flow-form result-contact-form">
+                        <div className="screen-heading">
+                          <p className="section-label">{wonReward.id !== 0 ? "Réclamer mon cadeau" : "Garder le contact (facultatif)"}</p>
+                          <p className="field-help">{wonReward.id !== 0
+                            ? "Enregistre ton nom complet et ton WhatsApp pour associer ton cadeau à ton identité et le réclamer au salon."
+                            : "Laisse ton nom complet et ton WhatsApp si tu veux que le salon puisse te recontacter. Tu peux aussi rejouer sans les renseigner."}</p>
+                        </div>
+                        <div className="form-fields">
+                          <Input label="Nom et prénom" type="text" autoComplete="name" placeholder="Ex : Yao Kouassi" {...register("fullName", { required: "Ton nom et ton prénom sont requis", validate: (value) => value.trim().split(/\s+/).length >= 2 || "Saisis ton nom et ton prénom" })} error={errors.fullName?.message} />
+                          <Input label="Numéro WhatsApp" icon={<IoLogoWhatsapp />} type="tel" autoComplete="tel" placeholder="Ex : +225 05 05 05 05 05" {...register("whatsapp", { required: "Ton numéro WhatsApp est requis", validate: (value) => /^\+?[0-9\s\-()]+$/.test(value) && value.replace(/\D/g, '').length >= 8 && value.replace(/\D/g, '').length <= 15 || "Numéro invalide" })} error={errors.whatsapp?.message} />
+                          <label className="consent-row">
+                            <input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />
+                            <span>J’accepte de recevoir les actualités et offres du salon sur WhatsApp. Cet accord est facultatif et distinct de la réclamation du cadeau.</span>
+                          </label>
+                        </div>
+                        <div className="form-action">
+                          <Button type="submit" disabled={busy}>{busy ? "Enregistrement…" : contactSaved ? "Mettre à jour mes coordonnées" : "Enregistrer mes coordonnées"}</Button>
+                          {contactSaved && <p className="field-help" role="status">Tes coordonnées sont associées à cette participation.{marketingConsent ? " Ton accord pour recevoir des actualités est enregistré." : " Tu ne recevras pas de messages promotionnels."}</p>}
+                        </div>
+                      </form>
+                      <ShareResult reward={wonReward} promoCode={promoCode} firstName={getValues("fullName")} contactSaved={contactSaved} />
+                      <div className="form-action">
+                        <Button onClick={startNewGame} disabled={(wonReward.id !== 0 && !contactSaved) || busy}>Rejouer</Button>
+                        {wonReward.id !== 0 && !contactSaved && <p className="field-help">Enregistre tes coordonnées pour réclamer ton cadeau et rejouer.</p>}
+                      </div>
                     </>
                   )}
                 </>

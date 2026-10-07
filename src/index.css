@@ -72,6 +72,7 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .app-button:disabled { background: #e5e5ea; color: #737378; }
 .button-secondary { background: #e9e9ed; color: var(--text); }
 .button-secondary:hover:not(:disabled) { background: #dedee4; }
+.button-secondary.is-disabled { cursor: not-allowed; opacity: .55; }
 .field { display: flex; flex-direction: column; gap: 9px; }
 .field-label { font-size: 13px; font-weight: 600; color: #48484c; line-height: 1.5; }
 .input-surface { display: flex; align-items: center; gap: 12px; background: var(--surface); border-radius: 14px; padding: 0 16px; min-height: 58px; outline: 1px solid transparent; transition: outline-color 150ms; }
@@ -81,6 +82,9 @@ input::placeholder, textarea::placeholder { color: #747479; opacity: 1; }
 .input-icon { color: #38834a; display: flex; font-size: 22px; }
 .field-help, .footnote { font-size: 13px; line-height: 1.55; color: var(--secondary); }
 .field-help { margin-top: -8px; padding: 0 3px; }
+.consent-row { display: flex; align-items: flex-start; gap: 12px; padding: 4px 3px; color: var(--secondary); font-size: 13px; line-height: 1.5; cursor: pointer; }
+.consent-row input { width: 20px; height: 20px; margin: 1px 0 0; flex: 0 0 auto; accent-color: #88640b; }
+.consent-row:focus-within { outline: 2px solid var(--link); outline-offset: 3px; border-radius: 4px; }
 .field-error { color: #b42318; font-size: 13px; line-height: 1.5; }
 .has-error { outline: 2px solid #b42318; }
 .optional-label { float: right; font-weight: 400; color: var(--secondary); }

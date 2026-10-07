@@ -13,7 +13,7 @@ const feedback = {
   sourceDecouverte: 'WhatsApp', avis: 'Accueil agréable',
 };
 
-function service(draw = 0.01, greenApi = null, properties = {}) {
+function service(draw = 0.01) {
   const rows = [];
   let locked = false;
   let draws = 0;
@@ -22,14 +22,14 @@ function service(draw = 0.01, greenApi = null, properties = {}) {
     getLastRow: () => rows.length + 1,
     appendRow: row => rows.push(row),
     getRange: (row, column, count = 1, columns = 1) => ({
-      getValue: () => row === 1 ? column === 18 ? 'Lot ID' : column === 21 ? 'Origine' : '' : rows[row - 2]?.[column - 1],
+      getValue: () => row === 1 ? ({18:'Lot ID', 21:'Origine', 22:'Actualités WhatsApp', 23:'Accord actualités le'})[column] || '' : rows[row - 2]?.[column - 1],
       getValues: () => rows.slice(row - 2, row - 2 + count).map(value => value.slice(column - 1, column - 1 + columns)),
       setValue: value => { rows[row - 2][column - 1] = value; },
     }),
   };
   const context = vm.createContext({
     Math: Object.assign(Object.create(Math), { random: () => { draws++; return draw; } }),
-    PropertiesService: { getScriptProperties: () => ({ getProperty: key => key === 'SPREADSHEET_ID' ? 'test-sheet' : greenApi ? ({GREEN_API_ID_INSTANCE: '123456', GREEN_API_TOKEN_INSTANCE: 'test-token', GREEN_API_URL: 'https://api.green-api.com', ...properties})[key] : null }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: key => key === 'SPREADSHEET_ID' ? 'test-sheet' : null }) },
     SpreadsheetApp: { openById: () => ({ getSheetByName: () => sheet }) },
     LockService: { getScriptLock: () => ({
       waitLock: () => { assert.equal(locked, false); locked = true; },
@@ -38,7 +38,7 @@ function service(draw = 0.01, greenApi = null, properties = {}) {
     }) },
     Utilities: { getUuid: () => (++uuidCount).toString(16).padStart(8, '0') + '-cccc-4ccc-cccc-cccccccccccc' },
     ContentService: { createTextOutput: text => ({ setMimeType: () => text }), MimeType: { JSON: 'json' } },
-    UrlFetchApp: { fetch: (...args) => greenApi(...args) },
+    UrlFetchApp: { fetch: () => { throw new Error('La participation ne doit pas appeler une API de messagerie.'); } },
     console,
   });
   vm.runInContext(script, context);
@@ -73,26 +73,53 @@ test('avis enregistré avant grattage, tirage caché et requêtes répétées id
   assert.equal(app.draws(), 1);
 });
 
-test('prénom court et âge omis : participation autorisée et données conservées', () => {
+test('participation anonyme et âge omis : participation autorisée sans coordonnées', () => {
   const app = service();
-  assert.equal(app.request({...feedback, nomPrenom:'Al', trancheAge:''}).saved, true);
-  assert.equal(app.rows[0][1], 'Al');
+  assert.equal(app.request({...feedback, nomPrenom:'', contact:'', trancheAge:''}).saved, true);
+  assert.equal(app.rows[0][1], '');
+  assert.equal(app.rows[0][2], '');
   assert.equal(app.rows[0][3], '');
   assert.equal(app.request({action:'reveal', participationId:id}).ok, true);
 });
 
-test('même téléphone : plusieurs parties autorisées, formats normalisés et chaque partie idempotente', () => {
+test('les coordonnées peuvent être ajoutées après le résultat sans message automatique', () => {
+  const app = service(0.01);
+  app.request({...feedback, nomPrenom:'', contact:''});
+  app.request({action:'reveal', participationId:id});
+  assert.equal(app.request({action:'profile', participationId:id, nomPrenom:'Yao', contact:'0505050505'}).ok, false);
+  const result = app.request({action:'profile', participationId:id, nomPrenom:'Yao Koffi', contact:'+225 05 05 05 05 05'});
+  assert.equal(result.saved, true);
+  assert.equal(result.nomPrenom, 'Yao Koffi');
+  assert.equal(result.contact, '+225 05 05 05 05 05');
+  assert.equal(app.rows[0][1], 'Yao Koffi');
+  assert.equal(app.rows[0][2], "'+225 05 05 05 05 05");
+  assert.equal(app.rows[0][16], '2250505050505');
+  assert.equal(app.rows[0][18], 'Résultat affiché dans l’application');
+  assert.equal(app.rows[0][21], 'Non');
+  assert.equal(result.marketingConsent, false);
+});
+
+test('consentement marketing facultatif, distinct et mémorisé avec sa date', () => {
   const app = service();
-  app.request(feedback);
-  for (const contact of ['0505050505', '002250505050505', '+225 (05) 05-05-05-05']) {
-    const result = app.request({ ...feedback, participationId: anotherId, contact });
-    assert.equal(result.ok, true);
-    assert.equal(result.saved, true);
-  }
-  assert.equal(app.rows.length, 2);
-  assert.equal(app.rows[1][16], app.rows[0][16]);
-  assert.equal(app.draws(), 2);
-  assert.notEqual(app.rows[1][10], app.rows[0][10]);
+  app.request({...feedback, nomPrenom:'', contact:''});
+  app.request({action:'reveal', participationId:id});
+  const saved = app.request({action:'profile', participationId:id, nomPrenom:'Yao Koffi', contact:'0505050505', marketingConsent:true});
+  assert.equal(saved.saved, true);
+  assert.equal(saved.marketingConsent, true);
+  assert.equal(app.rows[0][21], 'Oui');
+  assert.ok(app.rows[0][22]);
+  const optedOut = app.request({action:'profile', participationId:id, nomPrenom:'Yao Koffi', contact:'0505050505', marketingConsent:false});
+  assert.equal(optedOut.marketingConsent, false);
+  assert.equal(app.rows[0][21], 'Non');
+  assert.equal(app.rows[0][22], '');
+});
+
+test('coordonnées refusées avant révélation ou avec participation inconnue', () => {
+  const app = service();
+  app.request({...feedback, nomPrenom:'', contact:''});
+  assert.equal(app.request({action:'profile', participationId:id, nomPrenom:'Yao', contact:'0505050505'}).ok, false);
+  assert.equal(app.request({action:'profile', participationId:anotherId, nomPrenom:'Yao', contact:'0505050505'}).ok, false);
+  assert.equal(app.rows.length, 1);
 });
 
 test('le client ne peut imposer un cadeau ou un code et une perte n’a pas de code', () => {
@@ -106,7 +133,7 @@ test('le client ne peut imposer un cadeau ou un code et une perte n’a pas de c
 test('refuse les données invalides et un grattage sans avis', () => {
   const app = service();
   assert.equal(app.request({ action: 'reveal', participationId: id }).ok, false);
-  for (const changes of [{ noteCoupe: 6 }, { noteAccueil: 0 }, { sourceDecouverte: 'inconnue' }, { contact: '++' }, { participationId: 'invalid' }]) {
+  for (const changes of [{ noteCoupe: 6 }, { noteAccueil: 0 }, { sourceDecouverte: 'inconnue' }, { participationId: 'invalid' }]) {
     assert.equal(app.request({ ...feedback, ...changes }).ok, false);
   }
   assert.equal(app.rows.length, 0);
@@ -121,9 +148,20 @@ test('code à usage unique, vérifié dans la feuille, uniquement après révél
   assert.equal(app.rows[0][15], '');
   app.request({ action: 'reveal', participationId: id });
   assert.match(app.context.consumePromoCode('BBF-INVENTE'), /invalide/);
+  app.request({ action: 'profile', participationId: id, nomPrenom: 'Client Test', contact: '0505050505' });
   assert.match(app.context.consumePromoCode(code), /Code utilisé/);
   assert.ok(app.rows[0][15]);
   assert.match(app.context.consumePromoCode(code), /déjà été utilisé/);
+});
+
+test('un cadeau ne peut être réclamé qu’après l’enregistrement du nom et du WhatsApp', () => {
+  const app = service(0.01);
+  app.request({...feedback, nomPrenom:'', contact:''});
+  const result = app.request({action:'reveal', participationId:id});
+  assert.match(app.context.consumePromoCode(result.codePromo), /doit enregistrer son nom complet/);
+  assert.equal(app.rows[0][15], '');
+  app.request({action:'profile', participationId:id, nomPrenom:'Yao Koffi', contact:'0505050505'});
+  assert.match(app.context.consumePromoCode(result.codePromo), /Code utilisé/);
 });
 
 test('les commentaires sont stockés comme texte et non comme formules', () => {
@@ -167,81 +205,15 @@ test('diagnostic Apps Script v2 : contrôle sans ligne ni tirage', () => {
   assert.equal(app.draws(), 0);
 });
 
-test('WhatsApp : une seule tentative après révélation, sans bloquer le résultat', () => {
-  const messages = [];
-  const app = service(0.01, (url, options) => {
-    if (url.includes('/checkWhatsapp/')) return {getResponseCode: () => 200, getContentText: () => JSON.stringify({existsWhatsapp:true, chatId:'123456789012345@lid'})};
-    messages.push(JSON.parse(options.payload));
-    return { getResponseCode: () => 200, getContentText: () => JSON.stringify({idMessage:'message-test'}) };
-  });
+test('la révélation affiche le résultat sans envoyer de message WhatsApp', () => {
+  const app = service(0.01);
   app.request(feedback);
-  assert.equal(messages.length, 0);
-  app.request({action:'reveal',participationId:id});
-  app.request({action:'reveal',participationId:id});
-  app.request({action:'status',participationId:id});
-  assert.equal(messages.length, 1);
-  assert.equal(messages[0].chatId, '123456789012345@lid');
-  assert.match(messages[0].message, /Coupe gratuite/);
-  assert.match(messages[0].message, /BBF-/);
-  assert.equal(app.rows[0][18], 'Accepté par Green API');
-});
-
-test('WhatsApp indisponible : avis et cadeau conservés, pas de doublon au nouvel essai', () => {
-  let calls = 0;
-  const app = service(0.8, () => { calls++; throw new Error('network'); });
-  app.request(feedback);
-  assert.equal(app.request({action:'reveal',participationId:id}).ok, true);
-  assert.equal(app.rows[0][18], 'Vérification WhatsApp impossible — aucun envoi');
-  assert.equal(app.request({action:'reveal',participationId:id}).ok, true);
-  assert.equal(calls, 1);
-});
-
-test('ancien compte : seule une correspondance confirmée autorise une deuxième vérification', () => {
-  const calls = [];
-  const app = service(0.8, (url, options) => {
-    const data = JSON.parse(options.payload);
-    calls.push(data);
-    const body = url.includes('/checkWhatsapp/')
-      ? data.chatId === '2250505050505@c.us' ? {existsWhatsapp:false} : {existsWhatsapp:true,chatId:'123456789012345@lid'}
-      : {idMessage:'confirmed-message'};
-    return {getResponseCode: () => 200, getContentText: () => JSON.stringify(body)};
-  }, {GREEN_API_VERIFIED_PHONE_ALIASES: JSON.stringify({'2250505050505':'22505050505'})});
-  app.request(feedback);
-  app.request({action:'reveal',participationId:id});
-  assert.deepEqual(calls.map(call => call.chatId), ['2250505050505@c.us','22505050505@c.us','123456789012345@lid']);
-  assert.equal(app.rows[0][16], '2250505050505');
-  assert.equal(app.rows[0][18], 'Accepté par Green API');
-});
-
-test('compte inconnu, réponse invalide ou quota : aucun envoi ni suppression du résultat', () => {
-  for (const [status, body] of [[200,{existsWhatsapp:false}],[200,{existsWhatsapp:true,chatId:'bad-id'}],[466,{}],[200,{}]]) {
-    let calls = 0;
-    const app = service(0.8, (url) => {
-      calls++;
-      assert.match(url, /\/checkWhatsapp\//);
-      return {getResponseCode: () => status, getContentText: () => JSON.stringify(body)};
-    });
-    app.request(feedback);
-    assert.equal(app.request({action:'reveal',participationId:id}).ok, true);
-    app.request({action:'reveal',participationId:id});
-    assert.equal(calls, 1);
-    assert.equal(app.rows.length, 1);
-    assert.notEqual(app.rows[0][18], 'Accepté par Green API');
-  }
-});
-
-test('timeout pendant envoi : aucune deuxième tentative', () => {
-  let sends = 0;
-  const app = service(0.8, url => {
-    if (url.includes('/checkWhatsapp/')) return {getResponseCode: () => 200,getContentText: () => JSON.stringify({existsWhatsapp:true,chatId:'123456789012345@lid'})};
-    sends++;
-    throw new Error('network');
-  });
-  app.request(feedback);
-  app.request({action:'reveal',participationId:id});
-  app.request({action:'reveal',participationId:id});
-  assert.equal(sends, 1);
-  assert.equal(app.rows[0][18], 'Envoi incertain — à vérifier');
+  const result = app.request({action:'reveal',participationId:id});
+  assert.equal(result.rewardId, 1);
+  assert.match(result.codePromo, /^BBF-/);
+  assert.equal(app.rows[0][18], 'Résultat affiché dans l’application');
+  assert.equal(app.rows[0][19], '');
+  assert.equal(app.request({action:'reveal',participationId:id}).codePromo, result.codePromo);
 });
 
 test('historique sondage : import sans doublon, ancien code conservé et nouvelle partie autorisée', () => {

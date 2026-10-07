@@ -36,7 +36,7 @@ export async function forwardParticipation(data, webhookUrl, request = fetch) {
   if (!webhookUrl || !/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(webhookUrl)) {
     throw new ParticipationServiceError('WEBHOOK_MISSING', 'Le service de participation n’est pas configuré. Merci de prévenir le salon.');
   }
-  if (!data || !['save', 'status', 'reveal'].includes(data.action)) throw new Error('Requête invalide.');
+  if (!data || !['save', 'status', 'reveal', 'profile'].includes(data.action)) throw new Error('Requête invalide.');
   // Vérification sans écriture : un ancien doPost pourrait enregistrer une ligne
   // même pour une demande de statut. Ne pas lui transmettre de participation.
   // Un budget unique pour toute la requête, inférieur au délai du navigateur.

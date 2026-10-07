@@ -3,7 +3,7 @@ const LEGACY_SHEET = 'sondage';
 const CAMPAIGN = 'ouverture-beaufort-v1';
 const SOURCES = ['WhatsApp', 'Instagram', 'Un ami / bouche-à-oreille', 'En passant devant le salon', 'Autre'];
 const PRIZES = ['Aucun lot', 'Coupe gratuite', '30% de réduction', 'Pigmentation offerte', '20% de réduction', '10% de réduction'];
-const HEADERS = ['Date', 'Nom', 'WhatsApp', 'Tranche d’âge', 'Coupe', 'Accueil', 'Attente', 'Source', 'Avis', 'Récompense', 'Code promo', 'Emoji coupe', 'Participation', 'Opération', 'Révélé le', 'Code utilisé le', 'Numéro normalisé', 'Lot ID', 'WhatsApp statut', 'WhatsApp ID message', 'Origine'];
+const HEADERS = ['Date', 'Nom', 'WhatsApp', 'Tranche d’âge', 'Coupe', 'Accueil', 'Attente', 'Source', 'Avis', 'Récompense', 'Code promo', 'Emoji coupe', 'Participation', 'Opération', 'Révélé le', 'Code utilisé le', 'Numéro normalisé', 'Lot ID', 'WhatsApp statut', 'WhatsApp ID message', 'Origine', 'Actualités WhatsApp', 'Accord actualités le'];
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Le BeauFORT BarberShop')
@@ -18,6 +18,7 @@ function setupBeaufort() {
   sheet.setFrozenRows(1);
   sheet.getRange('A:A').setNumberFormat('dd/MM/yyyy HH:mm');
   sheet.getRange('O:P').setNumberFormat('dd/MM/yyyy HH:mm');
+  sheet.getRange('W:W').setNumberFormat('dd/MM/yyyy HH:mm');
   sheet.getRange('C:C').setNumberFormat('@');
   sheet.getRange('Q:Q').setNumberFormat('@');
   sheet.autoResizeColumns(1, HEADERS.length);
@@ -96,7 +97,7 @@ function doGet(event) {
   }
   try {
     getResponseSheet();
-    return jsonResult({ ok: true, revision: 'optional-age-v2', unlimitedPlays: true, optionalAge: true });
+    return jsonResult({ ok: true, revision: 'identity-after-result-v5', unlimitedPlays: true, optionalAge: true, automaticWhatsApp: false, marketingConsent: true });
   } catch {
     return jsonResult({ ok: false, code: 'SETUP_REQUIRED', message: 'Le service de participation n’est pas encore configuré. Merci de prévenir le salon.' });
   }
@@ -106,7 +107,10 @@ function getResponseSheet() {
   const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (!id) throw new Error('Exécuter setupBeaufort avant le déploiement.');
   const sheet = SpreadsheetApp.openById(id).getSheetByName(RESPONSE_SHEET);
-  if (!sheet || sheet.getRange(1, 18).getValue() !== 'Lot ID' || sheet.getRange(1, 21).getValue() !== 'Origine') throw new Error('Exécuter setupBeaufort.');
+  if (!sheet || sheet.getRange(1, 18).getValue() !== 'Lot ID' || sheet.getRange(1, 21).getValue() !== 'Origine' ||
+      sheet.getRange(1, 22).getValue() !== 'Actualités WhatsApp' || sheet.getRange(1, 23).getValue() !== 'Accord actualités le') {
+    throw new Error('Exécuter setupBeaufort pour ajouter les colonnes de consentement.');
+  }
   return sheet;
 }
 
@@ -124,16 +128,18 @@ function participationResult(row) {
   if (revealed) {
     result.rewardId = Number(row[17]);
     result.codePromo = String(row[10] || '');
+    result.nomPrenom = String(row[1] || '').replace(/^'/, '');
+    result.contact = String(row[2] || '').replace(/^'/, '');
+    result.marketingConsent = row[21] === 'Oui';
   }
   return result;
 }
 
 function doPost(event) {
   const lock = LockService.getScriptLock();
-  let notification = null;
   try {
     const data = JSON.parse(event.postData.contents);
-    if (['save', 'status', 'reveal'].indexOf(data.action) === -1 ||
+    if (['save', 'status', 'reveal', 'profile'].indexOf(data.action) === -1 ||
         !/^[a-f0-9-]{36}$/i.test(String(data.participationId || ''))) {
       return jsonResult({ ok: false, message: 'Participation invalide.' });
     }
@@ -146,18 +152,33 @@ function doPost(event) {
       if (data.action === 'reveal' && !row[14]) {
         row[14] = new Date();
         sheet.getRange(index + 2, 15).setValue(row[14]);
-        // Réserver l’unique tentative sous verrou avant d’appeler Green API.
-        sheet.getRange(index + 2, 19).setValue('Envoi en cours');
-        notification = { sheet: sheet, number: index + 2, row: row };
+        sheet.getRange(index + 2, 19).setValue('Résultat affiché dans l’application');
+      }
+      if (data.action === 'profile') {
+        if (!row[14]) return jsonResult({ ok: false, message: 'Révèle ton résultat avant d’enregistrer tes coordonnées.' });
+        const rawContact = String(data.contact || '').trim();
+        const phone = normalizePhone(rawContact);
+        const name = String(data.nomPrenom || '').trim();
+        if (!/^\+?[0-9\s()\-]+$/.test(rawContact) || !/^\d{8,15}$/.test(phone) || name.split(/\s+/).length < 2 || name.length > 80) {
+          return jsonResult({ ok: false, message: 'Saisis ton nom, ton prénom et un numéro WhatsApp valide.' });
+        }
+        row[1] = safeText(name);
+        row[2] = safeText(rawContact);
+        row[16] = phone;
+        sheet.getRange(index + 2, 2).setValue(row[1]);
+        sheet.getRange(index + 2, 3).setValue(row[2]);
+        sheet.getRange(index + 2, 17).setValue(phone);
+        const consent = data.marketingConsent === true;
+        sheet.getRange(index + 2, 22).setValue(consent ? 'Oui' : 'Non');
+        sheet.getRange(index + 2, 23).setValue(consent ? new Date() : '');
+        row[21] = consent ? 'Oui' : 'Non';
+        row[22] = consent ? new Date() : '';
       }
       return jsonResult(participationResult(row));
     }
     if (data.action === 'status') return jsonResult({ ok: true, saved: false, revealed: false });
     if (data.action === 'reveal') return jsonResult({ ok: false, message: 'Envoie ton avis avant de jouer.' });
-    const phone = normalizePhone(data.contact);
-    if (!/^\+?[0-9\s()\-]+$/.test(String(data.contact || '')) || !/^\d{8,15}$/.test(phone) || String(data.nomPrenom || '').trim().length < 2) {
-      return jsonResult({ ok: false, message: 'Vérifie ton nom et ton numéro WhatsApp.' });
-    }
+    if (data.action === 'profile') return jsonResult({ ok: false, message: 'Participation introuvable.' });
     if (['noteCoupe', 'noteAccueil', 'noteAttente'].some(function (key) {
       return !Number.isInteger(data[key]) || data[key] < 1 || data[key] > 5;
     })) return jsonResult({ ok: false, message: 'Choisis une note pour la coupe, l’accueil et le temps d’attente.' });
@@ -173,10 +194,10 @@ function doPost(event) {
       while (rows.some(function (row) { return row[10] === code; }));
     }
     const row = [
-      new Date(), safeText(data.nomPrenom), safeText(data.contact), safeText(data.trancheAge),
+      new Date(), '', '', safeText(data.trancheAge),
       data.noteCoupe, data.noteAccueil, data.noteAttente, safeText(data.sourceDecouverte),
       safeText(data.avis), PRIZES[prizeId], code, safeText(data.noteEmoji),
-      data.participationId, CAMPAIGN, '', '', phone, prizeId, 'En attente du grattage', '', '',
+      data.participationId, CAMPAIGN, '', '', '', prizeId, 'En attente du grattage', '', '',
     ];
     sheet.appendRow(row);
     return jsonResult(participationResult(row));
@@ -184,113 +205,7 @@ function doPost(event) {
     return jsonResult({ ok: false, message: 'Enregistrement impossible. Réessaie dans un instant ou signale-le au salon.' });
   } finally {
     if (lock.hasLock()) lock.releaseLock();
-    if (notification) {
-      // Le résultat déjà enregistré reste accessible même si WhatsApp échoue.
-      try { sendRecordedWhatsApp(notification); } catch { console.error('WhatsApp : suivi indisponible, aucun nouvel envoi automatique.'); }
-    }
   }
-}
-
-function sendRecordedWhatsApp(notification) {
-  const properties = PropertiesService.getScriptProperties();
-  const instance = properties.getProperty('GREEN_API_ID_INSTANCE');
-  const token = properties.getProperty('GREEN_API_TOKEN_INSTANCE');
-  const apiUrl = (properties.getProperty('GREEN_API_URL') || 'https://api.green-api.com').replace(/\/$/, '');
-  const sheet = notification.sheet;
-  const number = notification.number;
-  const row = notification.row;
-  if (!instance || !token) {
-    sheet.getRange(number, 19).setValue('Non configuré');
-    return;
-  }
-  if (!/^https:\/\/[a-z0-9.-]*green-?api\.com$/i.test(apiUrl) || !/^\d+$/.test(instance)) {
-    sheet.getRange(number, 19).setValue('Configuration invalide');
-    return;
-  }
-  const phone = normalizePhone(row[16] || row[2]);
-  if (!/^\d{8,15}$/.test(phone)) {
-    sheet.getRange(number, 19).setValue('Numéro invalide');
-    return;
-  }
-  const firstName = String(row[1] || '').replace(/^'/, '').trim().split(/\s+/)[0];
-    const message = row[10]
-      ? buildWinMessage(firstName, row[9], row[10]) : buildLossMessage(firstName);
-    let sendStarted = false;
-    try {
-      const baseUrl = apiUrl + '/waInstance' + instance;
-      const aliases = JSON.parse(properties.getProperty('GREEN_API_VERIFIED_PHONE_ALIASES') || '{}');
-      if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases)) {
-        sheet.getRange(number, 19).setValue('Correspondances WhatsApp invalides');
-        return;
-      }
-      // Only salon-confirmed mappings are allowed; never guess by removing an operator prefix.
-      const verifiedAlias = Object.prototype.hasOwnProperty.call(aliases, phone) ? aliases[phone] : null;
-      if (verifiedAlias !== null && !/^\d{8,15}$/.test(String(verifiedAlias))) {
-        sheet.getRange(number, 19).setValue('Correspondance WhatsApp invalide');
-        return;
-      }
-      let target = phone;
-      let account;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const check = UrlFetchApp.fetch(baseUrl + '/checkWhatsapp/' + encodeURIComponent(token), {
-          method: 'post', contentType: 'application/json',
-          payload: JSON.stringify({ chatId: target + '@c.us', force: true }),
-          muteHttpExceptions: true,
-        });
-        if (check.getResponseCode() < 200 || check.getResponseCode() >= 300) {
-          sheet.getRange(number, 19).setValue('Vérification WhatsApp : HTTP ' + check.getResponseCode());
-          return;
-        }
-        account = JSON.parse(check.getContentText());
-        if (account.existsWhatsapp === true) break;
-        if (account.existsWhatsapp !== false) {
-          sheet.getRange(number, 19).setValue('Réponse WhatsApp invalide');
-          return;
-        }
-        if (attempt === 0 && verifiedAlias && String(verifiedAlias) !== phone) {
-          target = String(verifiedAlias);
-        } else {
-          sheet.getRange(number, 19).setValue('Compte WhatsApp non trouvé — vérifier avec le client');
-          return;
-        }
-      }
-      const chatId = account.chatId;
-      if (typeof chatId !== 'string' || !/^\d{8,20}@(lid|c\.us)$/.test(chatId)) {
-        sheet.getRange(number, 19).setValue('Identifiant WhatsApp invalide');
-        return;
-      }
-      sheet.getRange(number, 19).setValue('Envoi en cours');
-      sendStarted = true;
-      const response = UrlFetchApp.fetch(apiUrl + '/waInstance' + instance + '/sendMessage/' + encodeURIComponent(token), {
-      method: 'post', contentType: 'application/json',
-        payload: JSON.stringify({ chatId: chatId, message: message }),
-      muteHttpExceptions: true,
-    });
-    const status = response.getResponseCode();
-    const body = JSON.parse(response.getContentText());
-    if (status >= 200 && status < 300 && body.idMessage) {
-      sheet.getRange(number, 19).setValue('Accepté par Green API');
-      sheet.getRange(number, 20).setValue(safeText(body.idMessage));
-    } else {
-      sheet.getRange(number, 19).setValue('Échec HTTP ' + status);
-    }
-  } catch {
-      sheet.getRange(number, 19).setValue(sendStarted ? 'Envoi incertain — à vérifier' : 'Vérification WhatsApp impossible — aucun envoi');
-  }
-}
-
-function buildWinMessage(firstName, prize, code) {
-  return '🎉 Félicitations ' + firstName + ' !\n\n'
-    + 'Chez *Le BeauFORT BarberShop*, tu as gagné :\n✨ *' + prize + '*\n\n'
-    + 'Ton code cadeau : *' + code + '*\n\n'
-    + 'Présente-le au salon lors de ta prochaine visite. Utilisable une seule fois. ✂️\n'
-    + 'Merci pour ton avis et à très vite !';
-}
-
-function buildLossMessage(firstName) {
-  return 'Merci ' + firstName + ' pour ta visite chez *Le BeauFORT BarberShop* ! 💛\n\n'
-    + 'Pas de lot cette fois, mais ton avis nous aide à améliorer ton prochain passage.\n'
-    + 'On sera heureux de te retrouver pour ta prochaine coupe. ✂️';
 }
 
 function findPromo(sheet, code) {
@@ -307,6 +222,7 @@ function consumePromoCode(code) {
     const sheet = getResponseSheet();
     const match = findPromo(sheet, code);
     if (!match || !match.values[14]) return 'Code invalide ou pas encore révélé.';
+    if (!match.values[1] || !match.values[2]) return 'Le gagnant doit enregistrer son nom complet et son WhatsApp avant de réclamer ce cadeau.';
     if (match.values[15]) return 'Ce code a déjà été utilisé.';
     sheet.getRange(match.number, 16).setValue(new Date());
     return 'Code utilisé : ' + match.values[9];
@@ -321,8 +237,9 @@ function redeemPromoCode() {
   if (!/^BBF-[A-Z0-9]{6,10}$/.test(code)) { ui.alert('Code invalide.'); return; }
   const match = findPromo(getResponseSheet(), code);
   if (!match || !match.values[14]) { ui.alert('Code invalide ou pas encore révélé.'); return; }
+  if (!match.values[1] || !match.values[2]) { ui.alert('Le gagnant doit enregistrer son nom complet et son WhatsApp avant de réclamer ce cadeau.'); return; }
   if (match.values[15]) { ui.alert('Ce code a déjà été utilisé.'); return; }
-  const decision = ui.alert('Code valide : ' + match.values[9], 'Numéro du client : ' + match.values[2] + '\nUtiliser ce code maintenant ?', ui.ButtonSet.YES_NO);
+  const decision = ui.alert('Code valide : ' + match.values[9], 'Gagnant : ' + match.values[1] + '\nWhatsApp : ' + match.values[2] + '\nUtiliser ce code maintenant ?', ui.ButtonSet.YES_NO);
   if (decision === ui.Button.YES) ui.alert(consumePromoCode(code));
 }
 

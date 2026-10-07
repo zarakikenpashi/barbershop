@@ -97,7 +97,7 @@ function doGet(event) {
   }
   try {
     getResponseSheet();
-    return jsonResult({ ok: true, revision: 'identity-after-result-v5', unlimitedPlays: true, optionalAge: true, automaticWhatsApp: false, marketingConsent: true });
+    return jsonResult({ ok: true, revision: 'identity-after-result-v6', unlimitedPlays: true, optionalAge: true, automaticWhatsApp: false, marketingConsent: true });
   } catch {
     return jsonResult({ ok: false, code: 'SETUP_REQUIRED', message: 'Le service de participation n’est pas encore configuré. Merci de prévenir le salon.' });
   }
@@ -107,11 +107,26 @@ function getResponseSheet() {
   const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (!id) throw new Error('Exécuter setupBeaufort avant le déploiement.');
   const sheet = SpreadsheetApp.openById(id).getSheetByName(RESPONSE_SHEET);
-  if (!sheet || sheet.getRange(1, 18).getValue() !== 'Lot ID' || sheet.getRange(1, 21).getValue() !== 'Origine' ||
-      sheet.getRange(1, 22).getValue() !== 'Actualités WhatsApp' || sheet.getRange(1, 23).getValue() !== 'Accord actualités le') {
+  if (!sheet) throw new Error('Exécuter setupBeaufort pour ajouter les colonnes de consentement.');
+  const headers = sheet.getRange(1, 18, 1, 6).getValues()[0];
+  if (headers[0] !== 'Lot ID' || headers[3] !== 'Origine' ||
+      headers[4] !== 'Actualités WhatsApp' || headers[5] !== 'Accord actualités le') {
     throw new Error('Exécuter setupBeaufort pour ajouter les colonnes de consentement.');
   }
   return sheet;
+}
+
+function findParticipation(sheet, participationId) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+  const match = sheet.getRange(2, 13, lastRow - 1, 1)
+    .createTextFinder(participationId)
+    .matchEntireCell(true)
+    .findNext();
+  if (!match) return null;
+  const rowNumber = match.getRow();
+  const row = sheet.getRange(rowNumber, 1, 1, HEADERS.length).getValues()[0];
+  return row[13] === CAMPAIGN ? { rowNumber: rowNumber, row: row } : null;
 }
 
 function normalizePhone(value) {
@@ -143,16 +158,17 @@ function doPost(event) {
         !/^[a-f0-9-]{36}$/i.test(String(data.participationId || ''))) {
       return jsonResult({ ok: false, message: 'Participation invalide.' });
     }
-    lock.waitLock(30000);
+    // Une simple reprise d’état ne modifie rien et ne doit pas attendre le verrou global.
+    if (data.action !== 'status') lock.waitLock(30000);
     const sheet = getResponseSheet();
-    const rows = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues() : [];
-    const index = rows.findIndex(function (row) { return row[12] === data.participationId && row[13] === CAMPAIGN; });
-    if (index !== -1) {
-      const row = rows[index];
+    const match = findParticipation(sheet, data.participationId);
+    if (match) {
+      const row = match.row;
+      const rowNumber = match.rowNumber;
       if (data.action === 'reveal' && !row[14]) {
         row[14] = new Date();
-        sheet.getRange(index + 2, 15).setValue(row[14]);
-        sheet.getRange(index + 2, 19).setValue('Résultat affiché dans l’application');
+        sheet.getRange(rowNumber, 15).setValue(row[14]);
+        sheet.getRange(rowNumber, 19).setValue('Résultat affiché dans l’application');
       }
       if (data.action === 'profile') {
         if (!row[14]) return jsonResult({ ok: false, message: 'Révèle ton résultat avant d’enregistrer tes coordonnées.' });
@@ -165,14 +181,13 @@ function doPost(event) {
         row[1] = safeText(name);
         row[2] = safeText(rawContact);
         row[16] = phone;
-        sheet.getRange(index + 2, 2).setValue(row[1]);
-        sheet.getRange(index + 2, 3).setValue(row[2]);
-        sheet.getRange(index + 2, 17).setValue(phone);
         const consent = data.marketingConsent === true;
-        sheet.getRange(index + 2, 22).setValue(consent ? 'Oui' : 'Non');
-        sheet.getRange(index + 2, 23).setValue(consent ? new Date() : '');
+        const consentDate = consent ? new Date() : '';
+        sheet.getRange(rowNumber, 2, 1, 2).setValues([[row[1], row[2]]]);
+        sheet.getRange(rowNumber, 17).setValue(phone);
+        sheet.getRange(rowNumber, 22, 1, 2).setValues([[consent ? 'Oui' : 'Non', consentDate]]);
         row[21] = consent ? 'Oui' : 'Non';
-        row[22] = consent ? new Date() : '';
+        row[22] = consentDate;
       }
       return jsonResult(participationResult(row));
     }
@@ -190,8 +205,15 @@ function doPost(event) {
     const prizeId = draw < 0.2 ? Math.floor(draw / 0.04) + 1 : 0;
     let code = '';
     if (prizeId) {
-      do { code = 'BBF-' + Utilities.getUuid().replace(/-/g, '').slice(0, 10).toUpperCase(); }
-      while (rows.some(function (row) { return row[10] === code; }));
+      do {
+        code = 'BBF-' + Utilities.getUuid().replace(/-/g, '').slice(0, 10).toUpperCase();
+        const lastRow = sheet.getLastRow();
+        const duplicate = lastRow > 1 && sheet.getRange(2, 11, lastRow - 1, 1)
+          .createTextFinder(code)
+          .matchEntireCell(true)
+          .findNext();
+        if (!duplicate) break;
+      } while (true);
     }
     const row = [
       new Date(), '', '', safeText(data.trancheAge),

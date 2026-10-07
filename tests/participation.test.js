@@ -16,23 +16,44 @@ const feedback = {
 function service(draw = 0.01) {
   const rows = [];
   let locked = false;
+  let lockWaits = 0;
   let draws = 0;
   let uuidCount = 0;
+  const ranges = [];
   const sheet = {
     getLastRow: () => rows.length + 1,
     appendRow: row => rows.push(row),
-    getRange: (row, column, count = 1, columns = 1) => ({
-      getValue: () => row === 1 ? ({18:'Lot ID', 21:'Origine', 22:'Actualités WhatsApp', 23:'Accord actualités le'})[column] || '' : rows[row - 2]?.[column - 1],
-      getValues: () => rows.slice(row - 2, row - 2 + count).map(value => value.slice(column - 1, column - 1 + columns)),
-      setValue: value => { rows[row - 2][column - 1] = value; },
-    }),
+    getRange: (row, column, count = 1, columns = 1) => {
+      ranges.push([row, column, count, columns]);
+      return {
+        getValue: () => row === 1 ? ({18:'Lot ID', 21:'Origine', 22:'Actualités WhatsApp', 23:'Accord actualités le'})[column] || '' : rows[row - 2]?.[column - 1],
+        getValues: () => row === 1
+          ? [Array.from({length: columns}, (_, index) => ({18:'Lot ID', 21:'Origine', 22:'Actualités WhatsApp', 23:'Accord actualités le'})[column + index] || '')]
+          : rows.slice(row - 2, row - 2 + count).map(value => value.slice(column - 1, column - 1 + columns)),
+        setValue: value => { rows[row - 2][column - 1] = value; },
+        setValues: values => values.forEach((valuesRow, rowIndex) => valuesRow.forEach((value, columnIndex) => {
+          rows[row - 2 + rowIndex][column - 1 + columnIndex] = value;
+        })),
+        createTextFinder: text => ({
+          matchEntireCell() { return this; },
+          findNext() {
+            for (let rowIndex = row - 2; rowIndex < row - 2 + count; rowIndex++) {
+              for (let columnIndex = column - 1; columnIndex < column - 1 + columns; columnIndex++) {
+                if (String(rows[rowIndex]?.[columnIndex] ?? '') === text) return { getRow: () => rowIndex + 2 };
+              }
+            }
+            return null;
+          },
+        }),
+      };
+    },
   };
   const context = vm.createContext({
     Math: Object.assign(Object.create(Math), { random: () => { draws++; return draw; } }),
     PropertiesService: { getScriptProperties: () => ({ getProperty: key => key === 'SPREADSHEET_ID' ? 'test-sheet' : null }) },
     SpreadsheetApp: { openById: () => ({ getSheetByName: () => sheet }) },
     LockService: { getScriptLock: () => ({
-      waitLock: () => { assert.equal(locked, false); locked = true; },
+      waitLock: () => { assert.equal(locked, false); locked = true; lockWaits++; },
       hasLock: () => locked,
       releaseLock: () => { locked = false; },
     }) },
@@ -43,8 +64,9 @@ function service(draw = 0.01) {
   });
   vm.runInContext(script, context);
   return {
-    rows, context, sheet,
+    rows, context, sheet, ranges,
     draws: () => draws,
+    lockWaits: () => lockWaits,
     request: data => JSON.parse(context.doPost({ postData: { contents: JSON.stringify(data) } })),
   };
 }
@@ -140,6 +162,18 @@ test('refuse les données invalides et un grattage sans avis', () => {
   assert.equal(app.request({ action: 'status', participationId: id }).saved, false);
 });
 
+test('le statut cherche seulement l’identifiant en colonne et ne prend pas le verrou', () => {
+  const app = service();
+  app.request(feedback);
+  const waitsBeforeStatus = app.lockWaits();
+  app.ranges.length = 0;
+  const result = app.request({action:'status', participationId:anotherId});
+  assert.equal(result.saved, false);
+  assert.equal(app.lockWaits(), waitsBeforeStatus);
+  assert.ok(app.ranges.some(([row, column, , columns]) => row === 2 && column === 13 && columns === 1));
+  assert.ok(!app.ranges.some(([row, column, , columns]) => row === 2 && column === 1 && columns === 23));
+});
+
 test('code à usage unique, vérifié dans la feuille, uniquement après révélation', () => {
   const app = service();
   app.request(feedback);
@@ -182,6 +216,13 @@ test('proxy : reçoit une confirmation v2 et refuse un ancien script ou une erre
     return { ok: true, json: async () => ({ version: 2, ok: true, saved: true, revealed: false }) };
   });
   assert.equal(result.saved, true);
+  const optimized = await forwardParticipation(feedback, url, async (_target, options) => ({
+    ok: true,
+    json: async () => options.method === 'GET'
+      ? ({version:2,ok:true,revision:'identity-after-result-v6'})
+      : ({version:2,ok:true,saved:true}),
+  }));
+  assert.equal(optimized.saved, true);
   await assert.rejects(forwardParticipation(feedback, url, async () => ({ ok: true, json: async () => ({ saved: true }) })), error => error.code === 'SCRIPT_UPDATE_REQUIRED');
   await assert.rejects(forwardParticipation(feedback, url, async (_target, options) => options.method === 'GET'
     ? {ok:true,json:async()=>({version:2,ok:true,revision:'identity-after-result-v4'})}
@@ -204,7 +245,7 @@ test('diagnostic Apps Script v2 : contrôle sans ligne ni tirage', () => {
   const response = JSON.parse(app.context.doGet({ parameter: { action: 'health' } }));
   assert.equal(response.ok, true);
   assert.equal(response.version, 2);
-  assert.equal(response.revision, 'identity-after-result-v5');
+  assert.equal(response.revision, 'identity-after-result-v6');
   assert.equal(app.rows.length, 0);
   assert.equal(app.draws(), 0);
 });
